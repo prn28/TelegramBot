@@ -11,6 +11,11 @@ TELEGRAM_TOKEN = os.getenv("8529976701:AAErv23MUiFWKk45STve3vPlfrkaCMXmzwY")
 GEMINI_API_KEY = os.getenv("AIzaSyBKdf7GFNAva2ZQPaLrPeUm8bb5ixQ54-0")
 CHAT_ID = "-1003778621579"
 
+# --- 🔐 SECURE CONFIGURATION ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 if not all([TELEGRAM_TOKEN, GEMINI_API_KEY, CHAT_ID]):
     raise EnvironmentError("Missing required environment variables.")
 
