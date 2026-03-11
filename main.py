@@ -7,10 +7,13 @@ import os
 import logging
 from typing import Set, Optional
 
-TELEGRAM_TOKEN = os.getenv("8529976701:AAErv23MUiFWKk45STve3vPlfrkaCMXmzwY")
-GEMINI_API_KEY = os.getenv("AIzaSyBKdf7GFNAva2ZQPaLrPeUm8bb5ixQ54-0")
-CHAT_ID = "-1003778621579"
+# --- 🔐 SECURE CONFIGURATION ---
+# Read tokens from environment variables (set in GitHub Secrets)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Debug: show which variables are missing
 missing_vars = []
 if not TELEGRAM_TOKEN:
     missing_vars.append("TELEGRAM_BOT_TOKEN")
