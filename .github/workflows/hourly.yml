@@ -2,8 +2,9 @@ name: Hourly Politics News
 
 on:
   schedule:
+    # Runs every hour at minute 0 (UTC)
     - cron: '0 * * * *'
-  workflow_dispatch:
+  workflow_dispatch:      # Allows manual trigger from the Actions tab
 
 jobs:
   run-script:
@@ -39,10 +40,3 @@ jobs:
         with:
           path: posted_links.txt
           key: posted-links-${{ github.run_id }}
-
-- name: Run the script
-  env:
-    TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-    TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-  run: python main.py
