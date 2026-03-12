@@ -9,7 +9,7 @@ from typing import Set, Optional
 
 # --- 🔐 SECURE CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # Changed from GROQ_API_KEY
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Validate environment variables
@@ -50,7 +50,7 @@ def save_history(link: str) -> None:
 def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     """
     Use OpenRouter API to summarize political news.
-    OpenRouter is free and works reliably from GitHub Actions.
+    OpenRouter is free, reliable and works from GitHub Actions.
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -61,7 +61,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     )
 
     payload = {
-        "model": "mistralai/mistral-7b-instruct:free",  # Free model on OpenRouter
+        "model": "meta-llama/llama-3.3-8b-instruct:free",  # Free model on OpenRouter
         "messages": [
             {
                 "role": "user",
@@ -76,8 +76,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'HTTP-Referer': 'https://github.com',  # Required by OpenRouter
-        'X-Title': 'Moldova News Bot'           # Required by OpenRouter
+        'HTTP-Referer': 'https://github.com'  # Required by OpenRouter
     }
 
     try:
@@ -182,7 +181,7 @@ def run() -> None:
             analysis = ask_ai_geopolitics(title, source_name)
             if analysis is None:
                 logging.info(f"Skipped '{title}' – AI marked as IGNORE or API failed.")
-                save_history(link)  # Remember it so we don't retry failed articles
+                save_history(link)  # Remember it so we don't retry non-political articles
                 history.add(link)
                 continue
 
