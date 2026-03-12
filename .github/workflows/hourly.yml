@@ -1,7 +1,7 @@
-name: Hourly Moldova News
+name: Moldova News Every 30 Min
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs every hour
+    - cron: '0,30 * * * *'  # Runs every 30 minutes
   workflow_dispatch:       # Allows manual trigger from Actions tab
 jobs:
   run-script:
