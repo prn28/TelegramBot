@@ -24,7 +24,7 @@ jobs:
             -H "Authorization: Bearer $OPENROUTER_KEY" \
             -H "HTTP-Referer: https://github.com" \
             -H "X-Title: Moldova News Bot" \
-            -d '{"model":"meta-llama/llama-3.3-70b-instruct:free","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
+            -d '{"model":"openrouter/free","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
             "https://openrouter.ai/api/v1/chat/completions")
           http_code=$(echo "$full_response" | tail -n1)
           body=$(echo "$full_response" | sed '$d')
