@@ -9,15 +9,15 @@ from typing import Set, Optional
 
 # --- 🔐 SECURE CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # Changed from GEMINI_API_KEY to GROQ_API_KEY
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # Changed from GROQ_API_KEY
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Validate environment variables
 missing_vars = []
 if not TELEGRAM_TOKEN:
     missing_vars.append("TELEGRAM_BOT_TOKEN")
-if not GROQ_API_KEY:
-    missing_vars.append("GROQ_API_KEY")
+if not OPENROUTER_API_KEY:
+    missing_vars.append("OPENROUTER_API_KEY")
 if not CHAT_ID:
     missing_vars.append("TELEGRAM_CHAT_ID")
 if missing_vars:
@@ -49,10 +49,10 @@ def save_history(link: str) -> None:
 
 def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     """
-    Use Groq API to summarize political news.
-    Groq is free, fast and reliable — replaces Gemini.
+    Use OpenRouter API to summarize political news.
+    OpenRouter is free and works reliably from GitHub Actions.
     """
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
 
     prompt = (
         f"Geopolitical analysis for a Moldova news channel. News from {source}: {title}. "
@@ -61,7 +61,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     )
 
     payload = {
-        "model": "llama-3.3-70b-versatile",  # Free, fast and reliable Groq model
+        "model": "mistralai/mistral-7b-instruct:free",  # Free model on OpenRouter
         "messages": [
             {
                 "role": "user",
@@ -75,7 +75,9 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     data = json.dumps(payload).encode('utf-8')
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {GROQ_API_KEY}'
+        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
+        'HTTP-Referer': 'https://github.com',  # Required by OpenRouter
+        'X-Title': 'Moldova News Bot'           # Required by OpenRouter
     }
 
     try:
@@ -85,7 +87,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
             text = res['choices'][0]['message']['content'].strip()
             return None if text == "IGNORE" else text
     except Exception as e:
-        logging.warning(f"Groq API error for {source}: {e}")
+        logging.warning(f"OpenRouter API error for {source}: {e}")
         return None
 
 def escape_markdown(text: str) -> str:
@@ -97,7 +99,7 @@ def escape_markdown(text: str) -> str:
 def post_to_telegram(source_name: str, analysis: str, link: str) -> None:
     """
     Send message to Telegram.
-    Fixed: text and link are escaped separately so the link stays clickable.
+    Text and link are escaped separately so the link stays clickable.
     """
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
@@ -180,7 +182,7 @@ def run() -> None:
             analysis = ask_ai_geopolitics(title, source_name)
             if analysis is None:
                 logging.info(f"Skipped '{title}' – AI marked as IGNORE or API failed.")
-                save_history(link)  # Remember it so we don't retry non-political articles
+                save_history(link)  # Remember it so we don't retry failed articles
                 history.add(link)
                 continue
 
