@@ -17,17 +17,18 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🔍 DIAGNOSTIC STEP – Tests Groq API key before running the bot
-      - name: Test Groq API key
+      # 🔍 DIAGNOSTIC STEP – Tests OpenRouter API key before running the bot
+      - name: Test OpenRouter API key
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          echo "Testing Groq API key..."
+          echo "Testing OpenRouter API key..."
           full_response=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $GROQ_API_KEY" \
-            -d '{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
-            "https://api.groq.com/openai/v1/chat/completions")
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            -H "HTTP-Referer: https://github.com" \
+            -d '{"model":"meta-llama/llama-3.3-8b-instruct:free","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
+            "https://openrouter.ai/api/v1/chat/completions")
 
           http_code=$(echo "$full_response" | tail -n1)
           body=$(echo "$full_response" | sed '$d')
@@ -37,10 +38,10 @@ jobs:
           echo "$body" | jq . 2>/dev/null || echo "$body"
 
           if [ "$http_code" -ne 200 ]; then
-            echo "❌ ERROR: Groq API call failed. Check your GROQ_API_KEY secret."
+            echo "❌ ERROR: OpenRouter API call failed. Check your OPENROUTER_API_KEY secret."
             exit 1
           else
-            echo "✅ Groq API key is valid and working!"
+            echo "✅ OpenRouter API key is valid and working!"
           fi
 
       - name: Restore posted links cache
@@ -55,7 +56,7 @@ jobs:
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
