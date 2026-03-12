@@ -2,9 +2,8 @@ name: Hourly Politics News
 
 on:
   schedule:
-    # Runs every hour at minute 0 (UTC)
     - cron: '0 * * * *'
-  workflow_dispatch:      # Allows manual trigger from the Actions tab
+  workflow_dispatch:
 
 jobs:
   run-script:
@@ -19,25 +18,30 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🔍 TEMPORARY DIAGNOSTIC STEP – Test Gemini API key
-      - name: Test Gemini API key
+      # 🔍 DIAGNOSTIC STEP – Tests Gemini API key and shows full response
+      - name: Test Gemini API key with detailed output
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "Testing Gemini API key..."
-          response=$(curl -s -w "\n%{http_code}" -X POST \
+          echo "Testing Gemini API key with model: gemini-2.5-flash"
+          full_response=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
             -d '{"contents":[{"parts":[{"text":"Say hello"}]}]}' \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY")
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
+            "https://generativelanguage.googleapis.com/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY")
+          
+          http_code=$(echo "$full_response" | tail -n1)
+          body=$(echo "$full_response" | sed '$d')
+          
           echo "HTTP Status: $http_code"
-          echo "Response body: $body"
+          echo "Full Response Body:"
+          # Try to pretty-print JSON if jq is available, otherwise print raw
+          echo "$body" | jq . 2>/dev/null || echo "$body"
+
           if [ "$http_code" -ne 200 ]; then
-            echo "❌ Gemini API key test failed. Check your key and model name."
+            echo "❌ ERROR: API call failed. Check your API key and model access."
             exit 1
           else
-            echo "✅ Gemini API key is valid!"
+            echo "✅ Gemini API key is valid and model is accessible!"
           fi
 
       - name: Restore posted links cache
