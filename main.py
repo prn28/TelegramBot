@@ -9,15 +9,15 @@ from typing import Set, Optional
 
 # --- 🔐 SECURE CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # Changed from GEMINI_API_KEY to GROQ_API_KEY
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Validate environment variables
 missing_vars = []
 if not TELEGRAM_TOKEN:
     missing_vars.append("TELEGRAM_BOT_TOKEN")
-if not OPENROUTER_API_KEY:
-    missing_vars.append("OPENROUTER_API_KEY")
+if not GROQ_API_KEY:
+    missing_vars.append("GROQ_API_KEY")
 if not CHAT_ID:
     missing_vars.append("TELEGRAM_CHAT_ID")
 if missing_vars:
@@ -49,10 +49,10 @@ def save_history(link: str) -> None:
 
 def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     """
-    Use OpenRouter API to summarize political news.
-    OpenRouter is free, reliable and works from GitHub Actions.
+    Use Groq API to summarize political news.
+    Groq is free, fast and reliable — replaces Gemini.
     """
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = "https://api.groq.com/openai/v1/chat/completions"
 
     prompt = (
         f"Geopolitical analysis for a Moldova news channel. News from {source}: {title}. "
@@ -61,7 +61,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     )
 
     payload = {
-        "model": "meta-llama/llama-3.3-8b-instruct:free",  # Free model on OpenRouter
+        "model": "llama-3.3-70b-versatile",  # Free, fast and reliable Groq model
         "messages": [
             {
                 "role": "user",
@@ -75,8 +75,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     data = json.dumps(payload).encode('utf-8')
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'HTTP-Referer': 'https://github.com'  # Required by OpenRouter
+        'Authorization': f'Bearer {GROQ_API_KEY}'
     }
 
     try:
@@ -86,7 +85,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
             text = res['choices'][0]['message']['content'].strip()
             return None if text == "IGNORE" else text
     except Exception as e:
-        logging.warning(f"OpenRouter API error for {source}: {e}")
+        logging.warning(f"Groq API error for {source}: {e}")
         return None
 
 def escape_markdown(text: str) -> str:
@@ -98,7 +97,7 @@ def escape_markdown(text: str) -> str:
 def post_to_telegram(source_name: str, analysis: str, link: str) -> None:
     """
     Send message to Telegram.
-    Text and link are escaped separately so the link stays clickable.
+    Fixed: text and link are escaped separately so the link stays clickable.
     """
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
@@ -195,3 +194,4 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
+
