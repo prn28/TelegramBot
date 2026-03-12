@@ -29,9 +29,9 @@ RATE_LIMIT_SLEEP = 2
 
 # Politics-focused RSS feeds
 SOURCES = {
-    "BBC Politics": "http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/uk_politics/rss.xml",
-    "Fox News Politics": "https://moxie.foxnews.com/google-publisher/politics.xml",
-    "CNN Politics": "http://rss.cnn.com/rss/cnn_allpolitics.rss"
+    "TV8 Moldova": "https://tv8.md/feed",
+    "Ziarul de Gardă": "https://www.zdg.md/feed",
+    "Newsmaker MD": "https://newsmaker.md/feed"
 }
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
