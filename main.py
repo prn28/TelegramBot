@@ -51,7 +51,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     Use Gemini API to summarize political news.
     The critical fix: using '/models/' endpoint without version prefix.
     """
-    # Use the model name that is confirmed to work (gemini-2.5-flash)
+    # Use the model name that is confirmed to work (gemini-2.0-flash)
     model_name = "gemini-2.5-flash"
     url = f"https://generativelanguage.googleapis.com/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
 
