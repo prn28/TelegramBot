@@ -1,14 +1,13 @@
-name: Hourly Politics News
+name: Hourly Moldova News
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *'  # Runs every hour
+  workflow_dispatch:       # Allows manual trigger from Actions tab
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,30 +17,30 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🔍 DIAGNOSTIC STEP – Tests Gemini API key and shows full response
-      - name: Test Gemini API key with detailed output
+      # 🔍 DIAGNOSTIC STEP – Tests Groq API key before running the bot
+      - name: Test Groq API key
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          echo "Testing Gemini API key with model: gemini-2.5-flash"
+          echo "Testing Groq API key..."
           full_response=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -d '{"contents":[{"parts":[{"text":"Say hello"}]}]}' \
-            "https://generativelanguage.googleapis.com/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY")
-          
+            -H "Authorization: Bearer $GROQ_API_KEY" \
+            -d '{"model":"llama3-8b-8192","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
+            "https://api.groq.com/openai/v1/chat/completions")
+
           http_code=$(echo "$full_response" | tail -n1)
           body=$(echo "$full_response" | sed '$d')
-          
+
           echo "HTTP Status: $http_code"
           echo "Full Response Body:"
-          # Try to pretty-print JSON if jq is available, otherwise print raw
           echo "$body" | jq . 2>/dev/null || echo "$body"
 
           if [ "$http_code" -ne 200 ]; then
-            echo "❌ ERROR: API call failed. Check your API key and model access."
+            echo "❌ ERROR: Groq API call failed. Check your GROQ_API_KEY secret."
             exit 1
           else
-            echo "✅ Gemini API key is valid and model is accessible!"
+            echo "✅ Groq API key is valid and working!"
           fi
 
       - name: Restore posted links cache
@@ -56,7 +55,7 @@ jobs:
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
