@@ -54,7 +54,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     Send title to Gemini API and request a one‑sentence geopolitical summary.
     Returns None if the news should be ignored (non‑political) or if the API call fails.
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview:generateContent?key={GEMINI_API_KEY}"
     prompt = (
         f"Geopolitical analysis for Kamorka channel. News from {source}: {title}. "
         f"Summarize in one sharp sentence. If the news is not political "
