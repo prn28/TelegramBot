@@ -8,12 +8,11 @@ import logging
 from typing import Set, Optional
 
 # --- 🔐 SECURE CONFIGURATION ---
-# Read tokens from environment variables (set in GitHub Secrets)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Debug: show which variables are missing
+# Validate environment variables
 missing_vars = []
 if not TELEGRAM_TOKEN:
     missing_vars.append("TELEGRAM_BOT_TOKEN")
@@ -25,10 +24,10 @@ if missing_vars:
     raise EnvironmentError(f"Missing environment variables: {', '.join(missing_vars)}")
 
 HISTORY_FILE = "posted_links.txt"
-REQUEST_TIMEOUT = 15          # seconds
-RATE_LIMIT_SLEEP = 2          # seconds between API calls
+REQUEST_TIMEOUT = 15
+RATE_LIMIT_SLEEP = 2
 
-# Politics-focused RSS feeds from major sources
+# Politics-focused RSS feeds
 SOURCES = {
     "BBC Politics": "http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/uk_politics/rss.xml",
     "Fox News Politics": "https://moxie.foxnews.com/google-publisher/politics.xml",
@@ -38,23 +37,24 @@ SOURCES = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_history() -> Set[str]:
-    """Load already posted links from history file."""
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
             return set(line.strip() for line in f if line.strip())
     return set()
 
 def save_history(link: str) -> None:
-    """Append a new link to the history file."""
     with open(HISTORY_FILE, "a") as f:
         f.write(link + "\n")
 
 def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     """
-    Send title to Gemini API and request a one‑sentence geopolitical summary.
-    Returns None if the news should be ignored (non‑political) or if the API call fails.
+    Use Gemini API to summarize political news.
+    The critical fix: using '/models/' endpoint without version prefix.
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview:generateContent?key={GEMINI_API_KEY}"
+    # Use the model name that is confirmed to work (gemini-2.5-flash)
+    model_name = "gemini-2.5-flash"
+    url = f"https://generativelanguage.googleapis.com/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+
     prompt = (
         f"Geopolitical analysis for Kamorka channel. News from {source}: {title}. "
         f"Summarize in one sharp sentence. If the news is not political "
@@ -72,17 +72,17 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
             return None if text == "IGNORE" else text
     except Exception as e:
         logging.warning(f"Gemini API error for {source}: {e}")
+        # Uncomment the next line to see full traceback (useful for debugging)
+        # logging.exception("Detailed error:")
         return None
 
 def escape_markdown(text: str) -> str:
-    """Escape Telegram MarkdownV2 special characters."""
     special_chars = r'_*[]()~`>#+-=|{}.!'
     for char in special_chars:
         text = text.replace(char, f'\\{char}')
     return text
 
 def post_to_telegram(text: str) -> None:
-    """Send a Markdown‑formatted message to the Telegram channel."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     safe_text = escape_markdown(text)
     payload = {
@@ -108,7 +108,6 @@ def fetch_rss_items(source_name: str, feed_url: str) -> list:
         req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
             root = ET.fromstring(response.read())
-            # Get the first (most recent) item
             item = root.find('.//item')
             if item is not None:
                 link_elem = item.find('link')
