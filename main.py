@@ -61,7 +61,7 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     )
 
     payload = {
-        "model": "llama3-8b-8192",  # Free, fast and reliable Groq model
+        "model": "llama-3.3-70b-versatile",  # Free, fast and reliable Groq model
         "messages": [
             {
                 "role": "user",
