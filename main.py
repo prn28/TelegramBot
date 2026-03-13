@@ -4,8 +4,9 @@ import json
 import xml.etree.ElementTree as ET
 import time
 import os
+import re
 import logging
-from typing import Set, Optional
+from typing import Set, Optional, List, Tuple
 
 # --- 🔐 SECURE CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -24,9 +25,17 @@ if missing_vars:
     raise EnvironmentError(f"Missing environment variables: {', '.join(missing_vars)}")
 
 HISTORY_FILE = "posted_links.txt"
+TITLE_HISTORY_FILE = "posted_titles.txt"   # Stores normalized titles for cross-source/cross-run dedup
+TITLE_SIMILARITY_THRESHOLD = 0.75          # Titles more similar than this are treated as the same story
 REQUEST_TIMEOUT = 15
 RATE_LIMIT_SLEEP = 2
-MAX_ITEMS_PER_SOURCE = 5  # Check up to 5 headlines per source
+MAX_ITEMS_PER_SOURCE = 5
+AI_RETRY_ATTEMPTS = 3
+AI_RETRY_DELAY = 10
+
+# --- ⏱ SELF-LOOP CONFIGURATION ---
+LOOP_INTERVAL_MINUTES = 30
+JOB_DURATION_HOURS = 5.5
 
 # Moldova-focused RSS feeds
 SOURCES = {
@@ -37,20 +46,74 @@ SOURCES = {
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
+# ---------------------------------------------------------------------------
+# 🔁 DEDUPLICATION HELPERS
+# ---------------------------------------------------------------------------
+
+def normalize_title(title: str) -> str:
+    """Lowercase, strip punctuation/extra spaces — makes fuzzy comparison reliable."""
+    title = title.lower()
+    title = re.sub(r'[^\w\s]', '', title)
+    title = re.sub(r'\s+', ' ', title).strip()
+    return title
+
+def title_similarity(a: str, b: str) -> float:
+    """
+    Simple word-overlap similarity (Jaccard index on word sets).
+    No external libraries needed — works on any Python install.
+    """
+    words_a = set(a.split())
+    words_b = set(b.split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union)
+
 def load_history() -> Set[str]:
+    """Load previously posted URLs."""
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
             return set(line.strip() for line in f if line.strip())
     return set()
 
-def save_history(link: str) -> None:
+def save_to_history(link: str) -> None:
     with open(HISTORY_FILE, "a") as f:
         f.write(link + "\n")
+
+def load_title_history() -> List[str]:
+    """Load previously posted normalized titles."""
+    if os.path.exists(TITLE_HISTORY_FILE):
+        with open(TITLE_HISTORY_FILE, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip()]
+    return []
+
+def save_title_history(title: str) -> None:
+    with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
+        f.write(normalize_title(title) + "\n")
+
+def is_duplicate_title(title: str, seen_titles: List[str]) -> bool:
+    """
+    Returns True if this title is too similar to any already-seen title.
+    Catches same story reported by two sources, or the same article reappearing
+    in a later run with a slightly different URL.
+    """
+    norm = normalize_title(title)
+    for seen in seen_titles:
+        if title_similarity(norm, seen) >= TITLE_SIMILARITY_THRESHOLD:
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# 🤖 AI FILTERING
+# ---------------------------------------------------------------------------
 
 def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     """
     Use OpenRouter API to summarize political news.
-    OpenRouter is free and works reliably from GitHub Actions.
+    Retries automatically on 429 rate-limit responses.
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -61,13 +124,8 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
     )
 
     payload = {
-        "model": "openrouter/free",
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
+        "model": "openrouter/auto",
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 150,
         "temperature": 0.5
     }
@@ -80,15 +138,36 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
         'X-Title': 'Moldova News Bot'
     }
 
-    try:
-        req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-            res = json.loads(response.read().decode('utf-8'))
-            text = res['choices'][0]['message']['content'].strip()
-            return None if text == "IGNORE" else text
-    except Exception as e:
-        logging.warning(f"OpenRouter API error for {source}: {e}")
-        return None
+    for attempt in range(1, AI_RETRY_ATTEMPTS + 1):
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                res = json.loads(response.read().decode('utf-8'))
+                text = res['choices'][0]['message']['content'].strip()
+                return None if text.upper() == "IGNORE" else text
+
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                logging.warning(f"OpenRouter rate-limited (429) for '{title}' – attempt {attempt}/{AI_RETRY_ATTEMPTS}. Waiting {AI_RETRY_DELAY}s...")
+                if attempt < AI_RETRY_ATTEMPTS:
+                    time.sleep(AI_RETRY_DELAY)
+                else:
+                    logging.warning(f"All {AI_RETRY_ATTEMPTS} attempts exhausted for '{title}'. Skipping.")
+                    return None
+            else:
+                logging.warning(f"OpenRouter HTTP error {e.code} for {source}: {e}")
+                return None
+
+        except Exception as e:
+            logging.warning(f"OpenRouter API error for {source}: {e}")
+            return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 📨 TELEGRAM
+# ---------------------------------------------------------------------------
 
 def escape_markdown(text: str) -> str:
     special_chars = r'_*[]()~`>#+-=|{}.!'
@@ -97,15 +176,10 @@ def escape_markdown(text: str) -> str:
     return text
 
 def post_to_telegram(source_name: str, analysis: str, link: str) -> None:
-    """
-    Send message to Telegram.
-    Fixed: text and link are escaped separately so the link stays clickable.
-    """
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     safe_source = escape_markdown(source_name)
     safe_analysis = escape_markdown(analysis)
-
     message = f"🇲🇩 *Moldova News* – {safe_source}\n\n{safe_analysis}\n\n🔗 [Read article]({link})"
 
     payload = {
@@ -124,50 +198,47 @@ def post_to_telegram(source_name: str, analysis: str, link: str) -> None:
     except Exception as e:
         logging.error(f"Failed to post to Telegram: {e}")
 
+
+# ---------------------------------------------------------------------------
+# 📡 RSS FETCHING
+# ---------------------------------------------------------------------------
+
 def get_link_from_item(item) -> Optional[str]:
-    """
-    Safely extract link from RSS item.
-    Tries multiple locations since different feeds store links differently.
-    """
-    # Try standard <link> tag first
     link_elem = item.find('link')
     if link_elem is not None and link_elem.text and link_elem.text.startswith('http'):
         return link_elem.text.strip()
-
-    # Some feeds put it as text after the <link> tag
     if link_elem is not None and link_elem.tail and link_elem.tail.strip().startswith('http'):
         return link_elem.tail.strip()
-
-    # Try <guid> tag which often contains the URL
     guid_elem = item.find('guid')
     if guid_elem is not None and guid_elem.text and guid_elem.text.startswith('http'):
         return guid_elem.text.strip()
-
     return None
 
-def fetch_rss_items(source_name: str, feed_url: str) -> list:
-    """Fetch up to MAX_ITEMS_PER_SOURCE items from an RSS feed."""
+def fetch_rss_items(source_name: str, feed_url: str) -> List[Tuple[str, str]]:
+    """Fetch up to MAX_ITEMS_PER_SOURCE (link, title) tuples from an RSS feed."""
     items = []
     try:
         req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
             root = ET.fromstring(response.read())
-
-            all_items = root.findall('.//item')
-            for item in all_items[:MAX_ITEMS_PER_SOURCE]:
+            for item in root.findall('.//item')[:MAX_ITEMS_PER_SOURCE]:
                 link = get_link_from_item(item)
                 title_elem = item.find('title')
-
                 if link and title_elem is not None and title_elem.text:
                     items.append((link, title_elem.text.strip()))
-
     except Exception as e:
         logging.error(f"Failed to fetch RSS for {source_name}: {e}")
     return items
 
+
+# ---------------------------------------------------------------------------
+# 🚀 MAIN CYCLE
+# ---------------------------------------------------------------------------
+
 def run() -> None:
-    history = load_history()
-    logging.info(f"Loaded {len(history)} previously posted links.")
+    url_history = load_history()
+    title_history = load_title_history()
+    logging.info(f"Loaded {len(url_history)} posted URLs, {len(title_history)} posted titles.")
 
     for source_name, feed_url in SOURCES.items():
         logging.info(f"Processing {source_name}...")
@@ -175,24 +246,56 @@ def run() -> None:
         logging.info(f"Found {len(items)} items from {source_name}")
 
         for link, title in items:
-            if link in history:
-                logging.debug(f"Skipping already posted link: {link}")
+            # 1. Skip if URL already posted
+            if link in url_history:
+                logging.debug(f"Skipping already posted URL: {link}")
+                continue
+
+            # 2. Skip if same story already posted (different source or slightly different URL)
+            if is_duplicate_title(title, title_history):
+                logging.info(f"Skipping duplicate story: '{title[:60]}'")
+                url_history.add(link)
+                save_to_history(link)
                 continue
 
             analysis = ask_ai_geopolitics(title, source_name)
             if analysis is None:
                 logging.info(f"Skipped '{title}' – AI marked as IGNORE or API failed.")
-                save_history(link)  # Remember it so we don't retry non-political articles
-                history.add(link)
+                url_history.add(link)
+                save_to_history(link)
+                title_history.append(normalize_title(title))
+                save_title_history(title)
                 continue
 
             post_to_telegram(source_name, analysis, link)
-            save_history(link)
-            history.add(link)
+            url_history.add(link)
+            save_to_history(link)
+            title_history.append(normalize_title(title))
+            save_title_history(title)
             logging.info(f"Posted: {title[:50]}...")
             time.sleep(RATE_LIMIT_SLEEP)
 
         time.sleep(RATE_LIMIT_SLEEP)
 
+
 if __name__ == "__main__":
-    run()
+    import datetime
+    job_start = time.time()
+    job_end = job_start + JOB_DURATION_HOURS * 3600
+    cycle = 1
+
+    while True:
+        logging.info(f"--- Cycle {cycle} starting at {datetime.datetime.utcnow().strftime('%H:%M:%S')} UTC ---")
+        run()
+        cycle += 1
+
+        now = time.time()
+        next_run = now + LOOP_INTERVAL_MINUTES * 60
+
+        if next_run >= job_end:
+            logging.info("Approaching GitHub Actions time limit — exiting cleanly.")
+            break
+
+        sleep_secs = next_run - now
+        logging.info(f"Sleeping {LOOP_INTERVAL_MINUTES} minutes until next cycle...")
+        time.sleep(sleep_secs)
