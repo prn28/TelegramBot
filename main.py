@@ -25,8 +25,8 @@ if missing_vars:
     raise EnvironmentError(f"Missing environment variables: {', '.join(missing_vars)}")
 
 HISTORY_FILE = "posted_links.txt"
-TITLE_HISTORY_FILE = "posted_titles.txt"   # Stores normalized titles for cross-source/cross-run dedup
-TITLE_SIMILARITY_THRESHOLD = 0.75          # Titles more similar than this are treated as the same story
+TITLE_HISTORY_FILE = "posted_titles.txt"
+TITLE_SIMILARITY_THRESHOLD = 0.75
 REQUEST_TIMEOUT = 15
 RATE_LIMIT_SLEEP = 2
 MAX_ITEMS_PER_SOURCE = 5
@@ -52,27 +52,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # ---------------------------------------------------------------------------
 
 def normalize_title(title: str) -> str:
-    """Lowercase, strip punctuation/extra spaces — makes fuzzy comparison reliable."""
     title = title.lower()
     title = re.sub(r'[^\w\s]', '', title)
     title = re.sub(r'\s+', ' ', title).strip()
     return title
 
 def title_similarity(a: str, b: str) -> float:
-    """
-    Simple word-overlap similarity (Jaccard index on word sets).
-    No external libraries needed — works on any Python install.
-    """
     words_a = set(a.split())
     words_b = set(b.split())
     if not words_a or not words_b:
         return 0.0
-    intersection = words_a & words_b
-    union = words_a | words_b
-    return len(intersection) / len(union)
+    return len(words_a & words_b) / len(words_a | words_b)
 
 def load_history() -> Set[str]:
-    """Load previously posted URLs."""
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
             return set(line.strip() for line in f if line.strip())
@@ -83,7 +75,6 @@ def save_to_history(link: str) -> None:
         f.write(link + "\n")
 
 def load_title_history() -> List[str]:
-    """Load previously posted normalized titles."""
     if os.path.exists(TITLE_HISTORY_FILE):
         with open(TITLE_HISTORY_FILE, "r", encoding="utf-8") as f:
             return [line.strip() for line in f if line.strip()]
@@ -94,11 +85,6 @@ def save_title_history(title: str) -> None:
         f.write(normalize_title(title) + "\n")
 
 def is_duplicate_title(title: str, seen_titles: List[str]) -> bool:
-    """
-    Returns True if this title is too similar to any already-seen title.
-    Catches same story reported by two sources, or the same article reappearing
-    in a later run with a slightly different URL.
-    """
     norm = normalize_title(title)
     for seen in seen_titles:
         if title_similarity(norm, seen) >= TITLE_SIMILARITY_THRESHOLD:
@@ -107,27 +93,37 @@ def is_duplicate_title(title: str, seen_titles: List[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 🤖 AI FILTERING
+# 🤖 AI FILTERING & SUMMARIZATION
 # ---------------------------------------------------------------------------
 
-def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
+def ask_ai_geopolitics(title: str, source: str) -> Optional[dict]:
     """
-    Use OpenRouter API to summarize political news.
-    Retries automatically on 429 rate-limit responses.
+    Returns a dict {"ro": "...", "en": "..."} for political news,
+    or None if not political or API failed.
+    Retries automatically on 429.
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
 
-    prompt = (
-        f"Geopolitical analysis for a Moldova news channel. News from {source}: {title}. "
-        f"Summarize in one sharp sentence in English. If the news is not political "
-        f"(e.g., sports, entertainment, gossip), reply with exactly 'IGNORE'."
-    )
+    prompt = "\n".join([
+        f'You are an editor for a Moldovan news channel.',
+        f'Analyze this news headline from {source}: "{title}"',
+        '',
+        'If this is NOT political or geopolitical news (e.g. sports, entertainment, celebrity gossip, weather),',
+        'respond with exactly: IGNORE',
+        '',
+        'If it IS political/geopolitical, respond with a JSON object and nothing else',
+        '(no markdown, no backticks, no explanation — raw JSON only):',
+        '{"ro": "2-3 sentence clear description in Romanian", "en": "2-3 sentence clear description in English"}',
+        '',
+        'Each description must explain: what happened, who is involved, and why it matters.',
+        'Write in a neutral, journalistic tone. Do not start with the source name.',
+    ])
 
     payload = {
         "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 150,
-        "temperature": 0.5
+        "max_tokens": 300,
+        "temperature": 0.4
     }
 
     data = json.dumps(payload).encode('utf-8')
@@ -142,9 +138,24 @@ def ask_ai_geopolitics(title: str, source: str) -> Optional[str]:
         try:
             req = urllib.request.Request(url, data=data, headers=headers)
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-                res = json.loads(response.read().decode('utf-8'))
+                raw = response.read().decode('utf-8')
+                res = json.loads(raw)
                 text = res['choices'][0]['message']['content'].strip()
-                return None if text.upper() == "IGNORE" else text
+
+                if text.upper() == "IGNORE":
+                    return None
+
+                # Parse the JSON response from the AI
+                try:
+                    parsed = json.loads(text)
+                    if "ro" in parsed and "en" in parsed:
+                        return parsed
+                    else:
+                        logging.warning(f"AI returned unexpected JSON keys: {text[:100]}")
+                        return None
+                except json.JSONDecodeError:
+                    logging.warning(f"AI did not return valid JSON: {text[:100]}")
+                    return None
 
         except urllib.error.HTTPError as e:
             if e.code == 429:
@@ -175,12 +186,33 @@ def escape_markdown(text: str) -> str:
         text = text.replace(char, f'\\{char}')
     return text
 
-def post_to_telegram(source_name: str, analysis: str, link: str) -> None:
+def post_to_telegram(source_name: str, analysis: dict, link: str) -> None:
+    """
+    Message format:
+    🇲🇩 Republica News – [Source]
+
+    [Romanian description]
+
+    ———————————————
+
+    [English description]
+
+    🔗 Read article
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     safe_source = escape_markdown(source_name)
-    safe_analysis = escape_markdown(analysis)
-    message = f"🇲🇩 *Moldova News* – {safe_source}\n\n{safe_analysis}\n\n🔗 [Read article]({link})"
+    safe_ro = escape_markdown(analysis["ro"])
+    safe_en = escape_markdown(analysis["en"])
+    divider = escape_markdown("———————————————")
+
+    message = (
+        f"🇲🇩 *Republica News* \\– {safe_source}\n\n"
+        f"{safe_ro}\n\n"
+        f"{divider}\n\n"
+        f"{safe_en}\n\n"
+        f"🔗 [Citește articolul]({link})"
+    )
 
     payload = {
         "chat_id": CHAT_ID,
@@ -215,7 +247,6 @@ def get_link_from_item(item) -> Optional[str]:
     return None
 
 def fetch_rss_items(source_name: str, feed_url: str) -> List[Tuple[str, str]]:
-    """Fetch up to MAX_ITEMS_PER_SOURCE (link, title) tuples from an RSS feed."""
     items = []
     try:
         req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -260,7 +291,7 @@ def run() -> None:
 
             analysis = ask_ai_geopolitics(title, source_name)
             if analysis is None:
-                logging.info(f"Skipped '{title}' – AI marked as IGNORE or API failed.")
+                logging.info(f"Skipped '{title}' – AI marked as IGNORE or returned invalid response.")
                 url_history.add(link)
                 save_to_history(link)
                 title_history.append(normalize_title(title))
