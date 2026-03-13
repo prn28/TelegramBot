@@ -1,11 +1,12 @@
-name: Moldova News Every 30 Min
+name: Hourly Moldova News
 on:
   schedule:
-    - cron: '0,30 * * * *'  # Runs every 30 minutes
+    - cron: '0 */6 * * *'  # GitHub starts the job every 6h; script loops internally every 30min
   workflow_dispatch:       # Allows manual trigger from Actions tab
 jobs:
   run-script:
     runs-on: ubuntu-latest
+    timeout-minutes: 350   # ~5h 50min — just under GitHub's 6h job limit
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,35 +25,43 @@ jobs:
             -H "Authorization: Bearer $OPENROUTER_KEY" \
             -H "HTTP-Referer: https://github.com" \
             -H "X-Title: Moldova News Bot" \
-            -d '{"model":"openrouter/free","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
+            -d '{"model":"openrouter/auto","messages":[{"role":"user","content":"Say hello"}],"max_tokens":10}' \
             "https://openrouter.ai/api/v1/chat/completions")
           http_code=$(echo "$full_response" | tail -n1)
           body=$(echo "$full_response" | sed '$d')
           echo "HTTP Status: $http_code"
           echo "Full Response Body:"
           echo "$body" | jq . 2>/dev/null || echo "$body"
-          if [ "$http_code" -ne 200 ]; then
-            echo "❌ ERROR: OpenRouter API call failed. Check your OPENROUTER_KEY secret."
+          if [ "$http_code" -eq 401 ] || [ "$http_code" -eq 403 ]; then
+            echo "❌ ERROR: OpenRouter API key is invalid or unauthorized."
             exit 1
+          elif [ "$http_code" -eq 429 ]; then
+            echo "⚠️  WARNING: OpenRouter is rate-limited upstream (429). Key is valid — proceeding anyway."
+          elif [ "$http_code" -ne 200 ]; then
+            echo "⚠️  WARNING: Unexpected HTTP status $http_code. Proceeding anyway."
           else
             echo "✅ OpenRouter API key is valid and working!"
           fi
-      - name: Restore posted links cache
+      - name: Restore history cache
         id: cache-history
         uses: actions/cache@v4
         with:
-          path: posted_links.txt
-          key: posted-links-stable
+          path: |
+            posted_links.txt
+            posted_titles.txt
+          key: posted-history-stable
           restore-keys: |
-            posted-links-
+            posted-history-
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
-      - name: Save posted links cache
+      - name: Save history cache
         uses: actions/cache@v4
         with:
-          path: posted_links.txt
-          key: posted-links-stable
+          path: |
+            posted_links.txt
+            posted_titles.txt
+          key: posted-history-stable
