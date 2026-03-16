@@ -41,7 +41,7 @@ JOB_DURATION_HOURS = 5.5
 SOURCES = {
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
-    "Newsmaker MD": "https://newsmaker.md/feed"
+    "Newsmaker MD": "https://newsmaker.md/ro/feed"
 }
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
