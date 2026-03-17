@@ -1,3 +1,4 @@
+```python
 import urllib.request
 import json
 import xml.etree.ElementTree as ET
@@ -28,7 +29,7 @@ SOURCES = {
     "Realitatea.md": "https://realitatea.md/rss"
 }
 
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
@@ -272,3 +273,4 @@ if __name__ == "__main__":
         run()
         logging.info("Sleeping for 30 minutes...")
         time.sleep(30 * 60)
+```
