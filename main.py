@@ -94,7 +94,7 @@ Răspunde DOAR:
 """
 
     payload = {
-        "model": "openrouter/auto",
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
         "max_tokens": 80
@@ -148,7 +148,7 @@ Răspunde DOAR: YES sau NO
 """
 
     payload = {
-        "model": "openrouter/auto",
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": 5
