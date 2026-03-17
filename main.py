@@ -7,9 +7,9 @@ import re
 import logging
 from typing import Set, Optional, List
 
-
+# --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Synchronized to match your GitHub Secret name
+# Matches your GitHub Secret name exactly
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") 
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -68,6 +68,10 @@ def save_title_history(title: str):
 # --- AI LOGIC ---
 
 def call_ai(prompt: str, max_tokens: int = 150) -> Optional[str]:
+    if not OPENROUTER_API_KEY:
+        logging.error("API Key is missing!")
+        return None
+
     payload = {
         "model": MODEL_NAME,
         "messages": [{"role": "user", "content": prompt}],
@@ -93,7 +97,7 @@ def call_ai(prompt: str, max_tokens: int = 150) -> Optional[str]:
         return None
 
 def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
-    prompt = f"Ești editor știri. Titlu: \"{title}\". Permite doar impact major (politică, economie, crize). Dacă e minor: IGNORE. Dacă e major, răspunde doar JSON: {{\"ro\": \"rezumat 1 propoziție\"}}"
+    prompt = f"Ești editor știri Moldova. Titlu: \"{title}\". Permite doar impact major. Dacă e minor: IGNORE. Dacă e major, răspunde doar JSON: {{\"ro\": \"rezumat 1 propoziție\"}}"
     text = call_ai(prompt)
     if not text or "IGNORE" in text.upper():
         return None
@@ -105,11 +109,11 @@ def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
 
 def is_same_event(new_title: str, past_titles: List[str]) -> bool:
     if not past_titles: return False
-    prompt = f"Titlu nou: \"{new_title}\"\nȘtiri vechi: {past_titles[-15:]}\nEste același eveniment? Răspunde doar YES sau NO."
+    prompt = f"Titlu nou: \"{new_title}\"\nȘtiri recente: {past_titles[-15:]}\nEste același eveniment? Răspunde doar YES sau NO."
     answer = call_ai(prompt, max_tokens=10)
     return answer and "YES" in answer.upper()
 
-# --- PROCESSING ---
+# --- MAIN ENGINE ---
 
 def fetch_rss_items(feed_url: str):
     items = []
@@ -139,8 +143,10 @@ def run():
     seen_links = load_history()
     seen_titles = load_title_history()
     for source, feed in SOURCES.items():
+        logging.info(f"Checking {source}...")
         for link, title in fetch_rss_items(feed):
             if is_repost(title) or link in seen_links: continue
+            
             summary = ask_ai_filter_and_summarize(title)
             if not summary or is_same_event(title, seen_titles): continue
             
