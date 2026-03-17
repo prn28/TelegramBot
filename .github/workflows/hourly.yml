@@ -3,20 +3,19 @@ on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
-    concurrency:
-      group: moldova-news
-      cancel-in-progress: false
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Restore history cache
         id: cache-history
         uses: actions/cache@v4
@@ -24,19 +23,23 @@ jobs:
           path: |
             posted_links.txt
             posted_titles.txt
-          key: posted-history-stable
+          key: posted-history-${{ github.run_id }}
           restore-keys: |
             posted-history-
+
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py
+          # This name must match line 14 of 1.py exactly
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python 1.py
+
       - name: Save history cache
+        if: always()
         uses: actions/cache@v4
         with:
           path: |
             posted_links.txt
             posted_titles.txt
-          key: posted-history-stable
+          key: posted-history-${{ github.run_id }}
