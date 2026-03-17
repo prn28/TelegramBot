@@ -31,9 +31,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # This name must match line 14 of 1.py exactly
+          # This must match your GitHub Secret name and line 13 of main.py
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python 1.py
+        run: python main.py
 
       - name: Save history cache
         if: always()
