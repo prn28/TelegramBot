@@ -60,7 +60,7 @@ def save_to_history(link: str):
 def load_title_history() -> List[str]:
     if os.path.exists(TITLE_HISTORY_FILE):
         lines = open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
-        return lines[-200:]  # keep last 200 only
+        return lines[-200:]
     return []
 
 def save_title_history(title: str):
@@ -115,7 +115,14 @@ Răspunde DOAR:
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            text = data["choices"][0]["message"]["content"].strip()
+
+            choices = data.get("choices", [])
+            if not choices:
+                return None
+            content = choices[0].get("message", {}).get("content")
+            if not content:
+                return None
+            text = content.strip()
             text = re.sub(r"```[a-z]*|```", "", text).strip()
 
             if text.upper() == "IGNORE":
@@ -170,7 +177,14 @@ Răspunde DOAR: YES sau NO
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            answer = data["choices"][0]["message"]["content"].strip().upper()
+
+            choices = data.get("choices", [])
+            if not choices:
+                return False
+            content = choices[0].get("message", {}).get("content")
+            if not content:
+                return False
+            answer = content.strip().upper()
             return "YES" in answer
 
     except Exception as e:
@@ -251,7 +265,6 @@ def run():
             if link in seen_links:
                 continue
 
-            # Filter first, then dedup (saves API calls)
             summary = ask_ai_filter_and_summarize(title)
             if not summary:
                 continue
