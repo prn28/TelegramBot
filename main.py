@@ -194,7 +194,7 @@ def fetch_rss_items(feed_url: str):
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM (FIXED HTML)
+# 📲 TELEGRAM (HTML)
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
@@ -225,7 +225,7 @@ def post_to_telegram(source: str, summary: str, link: str):
         logging.error(f"Telegram error: {e}")
 
 # ---------------------------------------------------------------------------
-# 🚀 MAIN
+# 🚀 MAIN LOOP (5.5 HOURS, every 30 min)
 # ---------------------------------------------------------------------------
 
 def run():
@@ -263,4 +263,21 @@ def run():
         time.sleep(RATE_LIMIT_SLEEP)
 
 if __name__ == "__main__":
-    run()
+    JOB_DURATION_HOURS = 5.5
+    LOOP_INTERVAL_MINUTES = 30
+
+    start_time = time.time()
+    end_time = start_time + JOB_DURATION_HOURS * 3600
+
+    while True:
+        logging.info("Starting news cycle...")
+        run()
+
+        next_run = time.time() + LOOP_INTERVAL_MINUTES * 60
+
+        if next_run >= end_time:
+            logging.info("Job ending to respect GitHub time limits.")
+            break
+
+        logging.info(f"Sleeping for {LOOP_INTERVAL_MINUTES} minutes...")
+        time.sleep(LOOP_INTERVAL_MINUTES * 60)
