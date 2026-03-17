@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 SOURCES = {
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
-    "Newsmaker MD": "https://newsmaker.md/feed",
+    "Newsmaker MD": "https://newsmaker.md/ro/feed",
     "Realitatea.md": "https://realitatea.md/rss"
 }
 
