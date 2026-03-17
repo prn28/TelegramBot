@@ -1,4 +1,3 @@
-```python
 import urllib.request
 import json
 import xml.etree.ElementTree as ET
@@ -273,4 +272,3 @@ if __name__ == "__main__":
         run()
         logging.info("Sleeping for 30 minutes...")
         time.sleep(30 * 60)
-```
