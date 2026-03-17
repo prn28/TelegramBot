@@ -9,8 +9,7 @@ from typing import Set, Optional, List
 
 # --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Matches your GitHub Secret name exactly
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") 
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 HISTORY_FILE = "posted_links.txt"
@@ -105,15 +104,17 @@ def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
         text = re.sub(r"```[a-z]*|```", "", text).strip()
         return json.loads(text).get("ro")
     except:
+        logging.error(f"AI filter parse error: {text}")
         return None
 
 def is_same_event(new_title: str, past_titles: List[str]) -> bool:
-    if not past_titles: return False
+    if not past_titles:
+        return False
     prompt = f"Titlu nou: \"{new_title}\"\nȘtiri recente: {past_titles[-15:]}\nEste același eveniment? Răspunde doar YES sau NO."
     answer = call_ai(prompt, max_tokens=10)
     return answer and "YES" in answer.upper()
 
-# --- MAIN ENGINE ---
+# --- RSS ---
 
 def fetch_rss_items(feed_url: str):
     items = []
@@ -122,40 +123,72 @@ def fetch_rss_items(feed_url: str):
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
             root = ET.fromstring(response.read())
             for item in root.findall('.//item')[:MAX_ITEMS_PER_SOURCE]:
-                title = item.find('title').text.strip()
-                link = item.find('link').text.strip()
+                title_el = item.find('title')
+                link_el = item.find('link')
+                if title_el is None or link_el is None:
+                    continue
+                title = title_el.text.strip()
+                link = link_el.text.strip()
                 items.append((link, title))
     except Exception as e:
         logging.error(f"RSS error: {e}")
     return items
+
+# --- TELEGRAM ---
 
 def post_to_telegram(source: str, summary: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     message = f"🇲🇩 <b>{source}</b>\n\n{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}
+        )
         urllib.request.urlopen(req)
+        logging.info(f"Posted successfully: {source}")
     except Exception as e:
         logging.error(f"Telegram error: {e}")
+
+# --- MAIN ---
 
 def run():
     seen_links = load_history()
     seen_titles = load_title_history()
     for source, feed in SOURCES.items():
         logging.info(f"Checking {source}...")
-        for link, title in fetch_rss_items(feed):
-            if is_repost(title) or link in seen_links: continue
-            
+        items = fetch_rss_items(feed)
+        logging.info(f"Found {len(items)} items from {source}")
+        for link, title in items:
+            logging.info(f"Processing: {title}")
+            if is_repost(title):
+                logging.info("Skipped: repost")
+                continue
+            if link in seen_links:
+                logging.info("Skipped: already posted")
+                continue
+
             summary = ask_ai_filter_and_summarize(title)
-            if not summary or is_same_event(title, seen_titles): continue
-            
+            logging.info(f"AI summary result: {summary}")
+            if not summary:
+                continue
+            if is_same_event(title, seen_titles):
+                logging.info("Skipped: same event")
+                continue
+
             post_to_telegram(source, summary, link)
+            logging.info(f"Posted: {title}")
             save_to_history(link)
             save_title_history(title)
             seen_links.add(link)
             seen_titles.append(normalize_title(title))
             time.sleep(RATE_LIMIT_SLEEP)
 
+
 if __name__ == "__main__":
-    run()
+    while True:
+        logging.info("Starting news cycle...")
+        run()
+        logging.info("Sleeping for 30 minutes...")
+        time.sleep(30 * 60)
