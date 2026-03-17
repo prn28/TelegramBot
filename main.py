@@ -9,15 +9,15 @@ from typing import Set, Optional, List
 
 # --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_WORKING")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 HISTORY_FILE = "posted_links.txt"
 TITLE_HISTORY_FILE = "posted_titles.txt"
 
 REQUEST_TIMEOUT = 15
-RATE_LIMIT_SLEEP = 15
-MAX_ITEMS_PER_SOURCE = 2
+RATE_LIMIT_SLEEP = 3
+MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,7 +28,7 @@ SOURCES = {
     "Realitatea.md": "https://realitatea.md/rss"
 }
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
