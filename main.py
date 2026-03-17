@@ -9,7 +9,7 @@ from typing import Set, Optional, List
 
 # --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_WORKING")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 HISTORY_FILE = "posted_links.txt"
@@ -28,7 +28,7 @@ SOURCES = {
     "Realitatea.md": "https://realitatea.md/rss"
 }
 
-MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
 # ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
@@ -68,12 +68,46 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
+# 🤖 GEMINI HELPER
+# ---------------------------------------------------------------------------
+
+def call_gemini(prompt: str, max_tokens: int = 80) -> Optional[str]:
+    url = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": max_tokens
+        }
+    }
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
+            data = json.loads(res.read())
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return None
+            content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text")
+            if not content:
+                return None
+            return content.strip()
+
+    except Exception as e:
+        logging.error(f"Gemini API error: {e}")
+        return None
+
+# ---------------------------------------------------------------------------
 # 🤖 AI: FILTER + SUMMARY
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
-    url = "https://openrouter.ai/api/v1/chat/completions"
-
     prompt = f"""
 Ești editor pentru un canal de știri foarte selectiv.
 
@@ -96,43 +130,19 @@ Răspunde DOAR:
 {{"ro": "rezumat foarte scurt, 1 propoziție"}}
 """
 
-    payload = {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-        "max_tokens": 80
-    }
+    text = call_gemini(prompt, max_tokens=80)
+    if not text:
+        return None
+
+    if "IGNORE" in text.upper():
+        return None
 
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
-            data = json.loads(res.read())
-
-            choices = data.get("choices", [])
-            if not choices:
-                return None
-            content = choices[0].get("message", {}).get("content")
-            if not content:
-                return None
-            text = content.strip()
-            text = re.sub(r"```[a-z]*|```", "", text).strip()
-
-            if text.upper() == "IGNORE":
-                return None
-
-            parsed = json.loads(text)
-            return parsed.get("ro")
-
-    except Exception as e:
-        logging.error(f"AI filter error: {e}")
+        text = re.sub(r"```[a-z]*|```", "", text).strip()
+        parsed = json.loads(text)
+        return parsed.get("ro")
+    except Exception:
+        logging.error(f"AI filter parse error: {text}")
         return None
 
 # ---------------------------------------------------------------------------
@@ -143,7 +153,6 @@ def is_same_event(new_title: str, past_titles: List[str]) -> bool:
     if not past_titles:
         return False
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
     recent = past_titles[-20:]
 
     prompt = f"""
@@ -158,38 +167,10 @@ Este același eveniment?
 Răspunde DOAR: YES sau NO
 """
 
-    payload = {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "max_tokens": 5
-    }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
-            data = json.loads(res.read())
-
-            choices = data.get("choices", [])
-            if not choices:
-                return False
-            content = choices[0].get("message", {}).get("content")
-            if not content:
-                return False
-            answer = content.strip().upper()
-            return "YES" in answer
-
-    except Exception as e:
-        logging.error(f"AI dedup error: {e}")
+    answer = call_gemini(prompt, max_tokens=5)
+    if not answer:
         return False
+    return "YES" in answer.upper()
 
 # ---------------------------------------------------------------------------
 # 📡 RSS
