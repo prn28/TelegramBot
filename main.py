@@ -16,7 +16,7 @@ HISTORY_FILE = "posted_links.txt"
 TITLE_HISTORY_FILE = "posted_titles.txt"
 
 REQUEST_TIMEOUT = 15
-RATE_LIMIT_SLEEP = 3
+RATE_LIMIT_SLEEP = 8
 MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
