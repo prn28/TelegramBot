@@ -17,7 +17,7 @@ jobs:
       # 🔍 DIAGNOSTIC STEP – Tests OpenRouter API key before running the bot
       - name: Test OpenRouter API key
         env:
-          OPEN_ROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
+          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           echo "Testing OpenRouter API key..."
           full_response=$(curl -s -w "\n%{http_code}" -X POST \
@@ -55,7 +55,7 @@ jobs:
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OPEN_ROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
+          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
       - name: Save history cache
