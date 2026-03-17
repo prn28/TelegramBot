@@ -5,7 +5,7 @@ import time
 import os
 import re
 import logging
-from typing import Set, Optional, List, Tuple
+from typing import Set, Optional, List
 
 # --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -29,7 +29,7 @@ SOURCES = {
 }
 
 # ---------------------------------------------------------------------------
-# 🧠 NORMALIZATION
+# 🧠 TITLE HELPERS
 # ---------------------------------------------------------------------------
 
 def normalize_title(title: str) -> str:
@@ -38,11 +38,9 @@ def normalize_title(title: str) -> str:
     title = re.sub(r'[^\w\s]', '', title)
     return re.sub(r'\s+', ' ', title).strip()
 
-
 def is_repost(title: str) -> bool:
     t = title.lower()
     return "sursa:" in t or "source:" in t or "preluat" in t
-
 
 # ---------------------------------------------------------------------------
 # 📁 HISTORY
@@ -53,25 +51,21 @@ def load_history() -> Set[str]:
         return set(open(HISTORY_FILE).read().splitlines())
     return set()
 
-
 def save_to_history(link: str):
     with open(HISTORY_FILE, "a") as f:
         f.write(link + "\n")
-
 
 def load_title_history() -> List[str]:
     if os.path.exists(TITLE_HISTORY_FILE):
         return open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
     return []
 
-
 def save_title_history(title: str):
     with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(normalize_title(title) + "\n")
 
-
 # ---------------------------------------------------------------------------
-# 🤖 AI: STRICT FILTER + SUMMARY
+# 🤖 AI: FILTER + SUMMARY
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
@@ -90,7 +84,6 @@ Permite DOAR știri cu impact major:
 Respinge:
 - știri minore
 - opinii
-- analize fără impact direct
 - evenimente locale nesemnificative
 
 Dacă NU este important: răspunde IGNORE
@@ -107,16 +100,16 @@ Răspunde DOAR:
         "max_tokens": 80
     }
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
-        }
-    )
-
     try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+        )
+
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
             text = data["choices"][0]["message"]["content"].strip()
@@ -127,12 +120,12 @@ Răspunde DOAR:
             parsed = json.loads(text)
             return parsed.get("ro")
 
-    except:
+    except Exception as e:
+        logging.error(f"AI filter error: {e}")
         return None
 
-
 # ---------------------------------------------------------------------------
-# 🤖 AI: EVENT DEDUPLICATION
+# 🤖 AI: SAME EVENT DETECTION
 # ---------------------------------------------------------------------------
 
 def is_same_event(new_title: str, past_titles: List[str]) -> bool:
@@ -140,23 +133,18 @@ def is_same_event(new_title: str, past_titles: List[str]) -> bool:
         return False
 
     url = "https://openrouter.ai/api/v1/chat/completions"
-
     recent = past_titles[-20:]
 
     prompt = f"""
-Compară titlul nou cu lista de știri deja publicate.
-
 Titlu nou:
 "{new_title}"
 
 Știri existente:
 {chr(10).join(recent)}
 
-Întrebare:
-Este aceeași știre sau același eveniment?
+Este același eveniment?
 
-Răspunde DOAR cu:
-YES sau NO
+Răspunde DOAR: YES sau NO
 """
 
     payload = {
@@ -166,23 +154,24 @@ YES sau NO
         "max_tokens": 5
     }
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
-        }
-    )
-
     try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+        )
+
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
             answer = data["choices"][0]["message"]["content"].strip().upper()
             return "YES" in answer
-    except:
-        return False
 
+    except Exception as e:
+        logging.error(f"AI dedup error: {e}")
+        return False
 
 # ---------------------------------------------------------------------------
 # 📡 RSS
@@ -200,38 +189,40 @@ def fetch_rss_items(feed_url: str):
                 link = item.find('link').text.strip()
                 items.append((link, title))
     except Exception as e:
-        logging.error(e)
+        logging.error(f"RSS error: {e}")
 
     return items
 
-
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM
+# 📲 TELEGRAM (FIXED HTML)
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     message = (
-        f"🇲🇩 *Republica News* \\– {source}\n\n"
+        f"🇲🇩 <b>Republica News</b> – {source}\n\n"
         f"{summary}\n\n"
-        f"🔗 [Citește articolul]({link})"
+        f"🔗 <a href='{link}'>Citește articolul</a>"
     )
 
     payload = {
         "chat_id": CHAT_ID,
         "text": message,
-        "parse_mode": "MarkdownV2"
+        "parse_mode": "HTML"
     }
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}
-    )
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req)
+        logging.info("Posted successfully")
 
-    urllib.request.urlopen(req)
-
+    except Exception as e:
+        logging.error(f"Telegram error: {e}")
 
 # ---------------------------------------------------------------------------
 # 🚀 MAIN
@@ -252,7 +243,6 @@ def run():
             if link in seen_links:
                 continue
 
-            # 🔥 AI EVENT CHECK
             if is_same_event(title, seen_titles):
                 continue
 
@@ -271,7 +261,6 @@ def run():
             time.sleep(RATE_LIMIT_SLEEP)
 
         time.sleep(RATE_LIMIT_SLEEP)
-
 
 if __name__ == "__main__":
     run()
