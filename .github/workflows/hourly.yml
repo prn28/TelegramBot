@@ -1,12 +1,12 @@
 name: Hourly Moldova News
 on:
   schedule:
-    - cron: '0 */6 * * *'  # GitHub starts the job every 6h; script loops internally every 30min
-  workflow_dispatch:       # Allows manual trigger from Actions tab
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 jobs:
   run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 350   # ~5h 50min — just under GitHub's 6h job limit
+    timeout-minutes: 350
     concurrency:
       group: moldova-news
       cancel-in-progress: false
@@ -30,7 +30,7 @@ jobs:
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GEMINI_API_KEY_WORKING: ${{ secrets.GEMINI_API_KEY_WORKING }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
       - name: Save history cache
