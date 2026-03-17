@@ -7,9 +7,9 @@ import re
 import logging
 from typing import Set, Optional, List
 
-# --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
+# Your OpenRouter API Key goes here
+OPENROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY") 
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 HISTORY_FILE = "posted_links.txt"
@@ -19,6 +19,11 @@ REQUEST_TIMEOUT = 15
 RATE_LIMIT_SLEEP = 3
 MAX_ITEMS_PER_SOURCE = 5
 
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+#change this to "meta-llama/llama-3.3-70b-instruct" if needed
+MODEL_NAME = "google/gemini-2.0-flash-001"
+
 logging.basicConfig(level=logging.INFO)
 
 SOURCES = {
@@ -27,8 +32,6 @@ SOURCES = {
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss"
 }
-
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
@@ -50,7 +53,8 @@ def is_repost(title: str) -> bool:
 
 def load_history() -> Set[str]:
     if os.path.exists(HISTORY_FILE):
-        return set(open(HISTORY_FILE).read().splitlines())
+        with open(HISTORY_FILE, "r") as f:
+            return set(f.read().splitlines())
     return set()
 
 def save_to_history(link: str):
@@ -59,7 +63,8 @@ def save_to_history(link: str):
 
 def load_title_history() -> List[str]:
     if os.path.exists(TITLE_HISTORY_FILE):
-        lines = open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
+        with open(TITLE_HISTORY_FILE, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
         return lines[-200:]
     return []
 
@@ -68,39 +73,36 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 GEMINI HELPER
+# 🤖 OPENROUTER HELPER (REPLACES GEMINI HELPER)
 # ---------------------------------------------------------------------------
 
-def call_gemini(prompt: str, max_tokens: int = 80) -> Optional[str]:
-    url = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
-
+def call_ai(prompt: str, max_tokens: int = 150) -> Optional[str]:
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": max_tokens
-        }
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.2
     }
 
     try:
         req = urllib.request.Request(
-            url,
+            OPENROUTER_URL,
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"}
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": "http://localhost", # Required by OpenRouter
+            }
         )
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return None
-            content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text")
-            if not content:
-                return None
-            return content.strip()
+            # OpenRouter returns choices[0].message.content
+            content = data.get("choices", [{}])[0].get("message", {}).get("content")
+            return content.strip() if content else None
 
     except Exception as e:
-        logging.error(f"Gemini API error: {e}")
+        logging.error(f"OpenRouter API error: {e}")
         return None
 
 # ---------------------------------------------------------------------------
@@ -130,7 +132,7 @@ Răspunde DOAR:
 {{"ro": "rezumat foarte scurt, 1 propoziție"}}
 """
 
-    text = call_gemini(prompt, max_tokens=80)
+    text = call_ai(prompt, max_tokens=150)
     if not text:
         return None
 
@@ -138,6 +140,7 @@ Răspunde DOAR:
         return None
 
     try:
+        # Clean markdown code blocks if AI includes them
         text = re.sub(r"```[a-z]*|```", "", text).strip()
         parsed = json.loads(text)
         return parsed.get("ro")
@@ -154,7 +157,6 @@ def is_same_event(new_title: str, past_titles: List[str]) -> bool:
         return False
 
     recent = past_titles[-20:]
-
     prompt = f"""
 Titlu nou:
 "{new_title}"
@@ -163,11 +165,10 @@ Titlu nou:
 {chr(10).join(recent)}
 
 Este același eveniment?
-
 Răspunde DOAR: YES sau NO
 """
 
-    answer = call_gemini(prompt, max_tokens=5)
+    answer = call_ai(prompt, max_tokens=10)
     if not answer:
         return False
     return "YES" in answer.upper()
@@ -192,7 +193,7 @@ def fetch_rss_items(feed_url: str):
                 link = link_el.text.strip()
                 items.append((link, title))
     except Exception as e:
-        logging.error(f"RSS error: {e}")
+        logging.error(f"RSS error from {feed_url}: {e}")
 
     return items
 
@@ -222,7 +223,7 @@ def post_to_telegram(source: str, summary: str, link: str):
             headers={"Content-Type": "application/json"}
         )
         urllib.request.urlopen(req)
-        logging.info("Posted successfully")
+        logging.info(f"Posted: {link}")
 
     except Exception as e:
         logging.error(f"Telegram error: {e}")
@@ -239,11 +240,7 @@ def run():
         items = fetch_rss_items(feed)
 
         for link, title in items:
-
-            if is_repost(title):
-                continue
-
-            if link in seen_links:
+            if is_repost(title) or link in seen_links:
                 continue
 
             summary = ask_ai_filter_and_summarize(title)
