@@ -16,7 +16,7 @@ HISTORY_FILE = "posted_links.txt"
 TITLE_HISTORY_FILE = "posted_titles.txt"
 
 REQUEST_TIMEOUT = 15
-RATE_LIMIT_SLEEP = 3
+RATE_LIMIT_SLEEP = 2
 MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +27,36 @@ SOURCES = {
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss"
 }
+
+# ========== PER‑SOURCE TEMPLATES ==========
+SOURCE_TEMPLATES = {
+    "TV8 Moldova": (
+        "📺 <b>TV8 Moldova</b>\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Vezi pe TV8.md</a>"
+    ),
+    "Ziarul de Gardă": (
+        "📰 <b>Ziarul de Gardă</b>\n"
+        "─────────────────\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Continuă pe ZDG.md</a>"
+    ),
+    "Newsmaker MD": (
+        "📢 <b>Newsmaker MD</b>\n"
+        "═══════════════════\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Citește integral</a>"
+    ),
+    "Realitatea.md": (
+        "📡 <b>Realitatea.md</b>\n"
+        "─────────────────\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Vezi știrea</a>"
+    )
+}
+# Default template if source not found
+DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
 
 # ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
@@ -57,8 +87,7 @@ def save_to_history(link: str):
 
 def load_title_history() -> List[str]:
     if os.path.exists(TITLE_HISTORY_FILE):
-        lines = open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
-        return lines[-200:]  # keep last 200 only
+        return open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
     return []
 
 def save_title_history(title: str):
@@ -66,7 +95,7 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY
+# 🤖 AI: FILTER + SUMMARY (with emoji encouragement)
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
@@ -77,25 +106,28 @@ Ești editor pentru un canal de știri foarte selectiv.
 
 Titlu: "{title}"
 
-Permite DOAR știri cu impact major:
-- decizii guvernamentale
-- politică națională/internațională
-- conflicte, crize, economie majoră
+Permite DOAR știri cu impact major din următoarele categorii:
+- politică națională și internațională (decizii guvernamentale, alegeri, relații externe)
+- conflicte și crize (războaie, tensiuni, dezastre, urgențe)
+- economie majoră (macroeconomic, politici fiscale, crize economice)
+- fintech și inovații financiare (bănci, criptomonede, plăți digitale, reglementări financiare)
+- crimă și justiție (infracțiuni grave, anchete, decizii judecătorești importante)
 
 Respinge:
-- știri minore
-- opinii
-- evenimente locale nesemnificative
+- știri minore (evenimente locale fără impact național)
+- opinii și editoriale
+- știri din divertisment, sport, lifestyle (dacă nu au legătură cu categoriile de mai sus)
+- știri despre vreme, animale, cultură (dacă nu sunt excepționale)
 
 Dacă NU este important: răspunde IGNORE
 
 Dacă ESTE:
-Răspunde DOAR:
-{{"ro": "rezumat foarte scurt, 1 propoziție"}}
+Răspunde DOAR cu un obiect JSON:
+{{"ro": "rezumat foarte scurt, 1 propoziție, care poate începe cu un emoji relevant"}}
 """
 
     payload = {
-        "model": "google/gemini-2.0-flash-001",
+        "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
         "max_tokens": 80
@@ -107,23 +139,15 @@ Răspunde DOAR:
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost"
+                "Content-Type": "application/json"
             }
         )
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            choices = data.get("choices", [])
-            if not choices:
-                return None
-            content = choices[0].get("message", {}).get("content")
-            if not content:
-                return None
-            text = content.strip()
-            text = re.sub(r"```[a-z]*|```", "", text).strip()
+            text = data["choices"][0]["message"]["content"].strip()
 
-            if "IGNORE" in text.upper():
+            if text.upper() == "IGNORE":
                 return None
 
             parsed = json.loads(text)
@@ -157,7 +181,7 @@ Răspunde DOAR: YES sau NO
 """
 
     payload = {
-        "model": "google/gemini-2.0-flash-001",
+        "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": 5
@@ -169,20 +193,13 @@ Răspunde DOAR: YES sau NO
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost"
+                "Content-Type": "application/json"
             }
         )
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            choices = data.get("choices", [])
-            if not choices:
-                return False
-            content = choices[0].get("message", {}).get("content")
-            if not content:
-                return False
-            answer = content.strip().upper()
+            answer = data["choices"][0]["message"]["content"].strip().upper()
             return "YES" in answer
 
     except Exception as e:
@@ -201,12 +218,8 @@ def fetch_rss_items(feed_url: str):
             root = ET.fromstring(response.read())
 
             for item in root.findall('.//item')[:MAX_ITEMS_PER_SOURCE]:
-                title_el = item.find('title')
-                link_el = item.find('link')
-                if title_el is None or link_el is None:
-                    continue
-                title = title_el.text.strip()
-                link = link_el.text.strip()
+                title = item.find('title').text.strip()
+                link = item.find('link').text.strip()
                 items.append((link, title))
     except Exception as e:
         logging.error(f"RSS error: {e}")
@@ -214,17 +227,18 @@ def fetch_rss_items(feed_url: str):
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM
+# 📲 TELEGRAM – USING PER‑SOURCE TEMPLATES
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    message = (
-        f"🇲🇩 <b>Republica News</b> – {source}\n\n"
-        f"{summary}\n\n"
-        f"🔗 <a href='{link}'>Citește articolul</a>"
-    )
+    # Get the template for this source, or fallback to default
+    template = SOURCE_TEMPLATES.get(source, DEFAULT_TEMPLATE)
+
+    # If you want to include the original title, you would need to pass it as an argument.
+    # For now we only have summary and link.
+    message = template.format(summary=summary, link=link)
 
     payload = {
         "chat_id": CHAT_ID,
@@ -248,40 +262,33 @@ def post_to_telegram(source: str, summary: str, link: str):
 # 🚀 MAIN
 # ---------------------------------------------------------------------------
 
-def run(seen_links: Set[str], seen_titles: List[str]):
-    """Single news cycle. Uses shared seen_links and seen_titles so
-    articles posted earlier in the same GitHub Actions run are never reposted."""
+def run():
+    seen_links = load_history()
+    seen_titles = load_title_history()
 
     for source, feed in SOURCES.items():
-        logging.info(f"Checking {source}...")
         items = fetch_rss_items(feed)
-        logging.info(f"Found {len(items)} items from {source}")
 
         for link, title in items:
-            logging.info(f"Processing: {title}")
 
             if is_repost(title):
-                logging.info("Skipped: repost")
                 continue
 
             if link in seen_links:
-                logging.info("Skipped: already posted")
-                continue
-
-            summary = ask_ai_filter_and_summarize(title)
-            logging.info(f"AI summary result: {summary}")
-            if not summary:
                 continue
 
             if is_same_event(title, seen_titles):
-                logging.info("Skipped: same event")
+                continue
+
+            summary = ask_ai_filter_and_summarize(title)
+            if not summary:
                 continue
 
             post_to_telegram(source, summary, link)
-            logging.info(f"Posted: {title}")
 
             save_to_history(link)
             save_title_history(title)
+
             seen_links.add(link)
             seen_titles.append(normalize_title(title))
 
@@ -289,14 +296,5 @@ def run(seen_links: Set[str], seen_titles: List[str]):
 
         time.sleep(RATE_LIMIT_SLEEP)
 
-
 if __name__ == "__main__":
-    # Load history once at startup — shared across all cycles in this run
-    seen_links = load_history()
-    seen_titles = load_title_history()
-
-    while True:
-        logging.info("Starting news cycle...")
-        run(seen_links, seen_titles)
-        logging.info("Sleeping for 30 minutes...")
-        time.sleep(30 * 60)
+    run()
