@@ -23,21 +23,18 @@ logging.basicConfig(level=logging.INFO)
 
 # ========== SOURCES ==========
 SOURCES = {
-    # Your existing sources
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss",
     "MOLDPRES - Română": "https://moldpres.md/config/rss.php?lang=rom",
-    "MOLDPRES - Русский": "https://moldpres.md/config/rss.php?lang=rus",
-    "MOLDPRES - English": "https://moldpres.md/config/rss.php?lang=eng",
     "MOLDPRES Sinteza - Română": "https://moldpres.md/config/rssSinteza.php?lang=rom",
     "Stiri.md": "https://stiri.md/rss",  # Comprehensive news portal [citation:9]
-    "Canal Regional TV": "https://canalregionaltv.md/feed",  # Regional news [citation:8]
-    "Media TV": "https://mediatv.md/feed",  # News outlet [citation:8]
-    "MOVCA": "https://movca.md/feed",  # News/cultural content [citation:8]
-    "ASE MD": "https://ase.md/feed",  # Economic news (university, but may have econ content) [citation:8]
-    "Biofood": "https://biofood.md/feed",  # Agriculture/food news [citation:8]
+    "Canal Regional TV": "https://canalregionaltv.md/feed",  
+    "Media TV": "https://mediatv.md/feed", 
+    "MOVCA": "https://movca.md/feed",  
+    "ASE MD": "https://ase.md/feed",  
+    "Biofood": "https://biofood.md/feed", 
 }
 
 # ========== SOURCE TEMPLATES ==========
@@ -66,10 +63,7 @@ SOURCE_TEMPLATES = {
         "🏛️ <b>MOLDPRES</b> – Agenția de Stat\n\n"
         "{summary}\n\n"
         "🔗 <a href='{link}'>Sursa oficială</a>"
-    ),
-    ),
-    ),
-    ),
+   ), 
     "Stiri.md": (
         "📌 <b>Stiri.md</b>\n\n"
         "{summary}\n\n"
@@ -261,7 +255,7 @@ Răspunde DOAR: YES sau NO
         return False
 
 # ---------------------------------------------------------------------------
-# 📡 RSS – extracts description
+# 📡 RSS
 # ---------------------------------------------------------------------------
 
 def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
@@ -293,7 +287,7 @@ def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM – CLEAN, MINIMAL DESIGN
+# 📲 TELEGRAM 
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
