@@ -111,7 +111,7 @@ TYPE_BADGES = {
     "politics": "🏛️ POLITIC",
     "economy": "💰 ECONOMIE",
     "crime": "⚖️ JUSTIȚIE",
-    "conflict": "⚔️ CONFLICT",
+    "conflict": "⚠️ SECURITATE",
     "fintech": "💳 FINTECH",
     "analysis": "📊 ANALIZĂ",
     "opinion": "💬 OPINIE",
