@@ -16,7 +16,7 @@ HISTORY_FILE = "posted_links.txt"
 TITLE_HISTORY_FILE = "posted_titles.txt"
 
 REQUEST_TIMEOUT = 15
-RATE_LIMIT_SLEEP = 2
+RATE_LIMIT_SLEEP = 3
 MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +57,8 @@ def save_to_history(link: str):
 
 def load_title_history() -> List[str]:
     if os.path.exists(TITLE_HISTORY_FILE):
-        return open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
+        lines = open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
+        return lines[-200:]  # keep last 200 only
     return []
 
 def save_title_history(title: str):
@@ -94,7 +95,7 @@ Răspunde DOAR:
 """
 
     payload = {
-        "model": "openrouter/auto",
+        "model": "google/gemini-2.0-flash-001",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
         "max_tokens": 80
@@ -106,15 +107,23 @@ Răspunde DOAR:
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost"
             }
         )
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            text = data["choices"][0]["message"]["content"].strip()
+            choices = data.get("choices", [])
+            if not choices:
+                return None
+            content = choices[0].get("message", {}).get("content")
+            if not content:
+                return None
+            text = content.strip()
+            text = re.sub(r"```[a-z]*|```", "", text).strip()
 
-            if text.upper() == "IGNORE":
+            if "IGNORE" in text.upper():
                 return None
 
             parsed = json.loads(text)
@@ -148,7 +157,7 @@ Răspunde DOAR: YES sau NO
 """
 
     payload = {
-        "model": "openrouter/auto",
+        "model": "google/gemini-2.0-flash-001",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": 5
@@ -160,13 +169,20 @@ Răspunde DOAR: YES sau NO
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost"
             }
         )
 
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
             data = json.loads(res.read())
-            answer = data["choices"][0]["message"]["content"].strip().upper()
+            choices = data.get("choices", [])
+            if not choices:
+                return False
+            content = choices[0].get("message", {}).get("content")
+            if not content:
+                return False
+            answer = content.strip().upper()
             return "YES" in answer
 
     except Exception as e:
@@ -185,8 +201,12 @@ def fetch_rss_items(feed_url: str):
             root = ET.fromstring(response.read())
 
             for item in root.findall('.//item')[:MAX_ITEMS_PER_SOURCE]:
-                title = item.find('title').text.strip()
-                link = item.find('link').text.strip()
+                title_el = item.find('title')
+                link_el = item.find('link')
+                if title_el is None or link_el is None:
+                    continue
+                title = title_el.text.strip()
+                link = link_el.text.strip()
                 items.append((link, title))
     except Exception as e:
         logging.error(f"RSS error: {e}")
@@ -194,7 +214,7 @@ def fetch_rss_items(feed_url: str):
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM (FIXED HTML)
+# 📲 TELEGRAM
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
@@ -228,33 +248,40 @@ def post_to_telegram(source: str, summary: str, link: str):
 # 🚀 MAIN
 # ---------------------------------------------------------------------------
 
-def run():
-    seen_links = load_history()
-    seen_titles = load_title_history()
+def run(seen_links: Set[str], seen_titles: List[str]):
+    """Single news cycle. Uses shared seen_links and seen_titles so
+    articles posted earlier in the same GitHub Actions run are never reposted."""
 
     for source, feed in SOURCES.items():
+        logging.info(f"Checking {source}...")
         items = fetch_rss_items(feed)
+        logging.info(f"Found {len(items)} items from {source}")
 
         for link, title in items:
+            logging.info(f"Processing: {title}")
 
             if is_repost(title):
+                logging.info("Skipped: repost")
                 continue
 
             if link in seen_links:
-                continue
-
-            if is_same_event(title, seen_titles):
+                logging.info("Skipped: already posted")
                 continue
 
             summary = ask_ai_filter_and_summarize(title)
+            logging.info(f"AI summary result: {summary}")
             if not summary:
                 continue
 
+            if is_same_event(title, seen_titles):
+                logging.info("Skipped: same event")
+                continue
+
             post_to_telegram(source, summary, link)
+            logging.info(f"Posted: {title}")
 
             save_to_history(link)
             save_title_history(title)
-
             seen_links.add(link)
             seen_titles.append(normalize_title(title))
 
@@ -262,5 +289,14 @@ def run():
 
         time.sleep(RATE_LIMIT_SLEEP)
 
+
 if __name__ == "__main__":
-    run()
+    # Load history once at startup — shared across all cycles in this run
+    seen_links = load_history()
+    seen_titles = load_title_history()
+
+    while True:
+        logging.info("Starting news cycle...")
+        run(seen_links, seen_titles)
+        logging.info("Sleeping for 30 minutes...")
+        time.sleep(30 * 60)
