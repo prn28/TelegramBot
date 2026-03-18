@@ -17,9 +17,13 @@ TITLE_HISTORY_FILE = "posted_titles.txt"
 
 REQUEST_TIMEOUT = 15
 RATE_LIMIT_SLEEP = 2
-MAX_ITEMS_PER_SOURCE = 3  # Reduced from 5 to lower volume
+MAX_ITEMS_PER_SOURCE = 3
 
-logging.basicConfig(level=logging.INFO)
+# --- LOOP CONFIG ---
+CYCLE_INTERVAL_SECONDS = 30 * 60   # 30 minutes between cycles
+TOTAL_RUNTIME_SECONDS  = int(5.5 * 3600)  # 5 hours 30 minutes = 19800 s
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 # ========== SOURCES ==========
 SOURCES = {
@@ -37,7 +41,7 @@ SOURCES = {
     "Biofood": "https://biofood.md/feed",
 }
 
-# ========== PER‑SOURCE TEMPLATES (clean, professional) ==========
+# ========== PER‑SOURCE TEMPLATES ==========
 SOURCE_TEMPLATES = {
     "TV8 Moldova": (
         "📺 <b>TV8 Moldova</b>\n\n"
@@ -102,7 +106,6 @@ SOURCE_TEMPLATES = {
 }
 DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
 
-# Map news types to Romanian badges
 TYPE_BADGES = {
     "breaking": "🔴 BREAKING",
     "politics": "🏛️ POLITIC",
@@ -155,13 +158,10 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY + TYPE (STRICTER PROMPT)
+# 🤖 AI: FILTER + SUMMARY + TYPE
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[Dict[str, str]]:
-    """
-    Returns dict with 'ro' (summary) and 'type' (category) or None if ignored/error.
-    """
     url = "https://openrouter.ai/api/v1/chat/completions"
 
     content = f"Titlu: {title}\n"
@@ -223,12 +223,8 @@ Răspunde DOAR cu un obiect JSON:
             if "ignore" in text.lower():
                 return None
 
-            # Try to extract JSON from response (in case AI adds extra text)
             match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                json_str = match.group()
-            else:
-                json_str = text
+            json_str = match.group() if match else text
 
             try:
                 parsed = json.loads(json_str)
@@ -356,12 +352,11 @@ def post_to_telegram(source: str, summary_with_badge: str, link: str):
         logging.error(f"Telegram error: {e}")
 
 # ---------------------------------------------------------------------------
-# 🚀 MAIN
+# 🔄 ONE SCAN CYCLE
 # ---------------------------------------------------------------------------
 
-def run():
-    seen_links = load_history()
-    seen_titles = load_title_history()
+def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
+    logging.info(f"=== Cycle {cycle_num} starting ===")
 
     for source, feed in SOURCES.items():
         items = fetch_rss_items(feed)
@@ -387,7 +382,6 @@ def run():
             summary = result["summary"]
             news_type = result["type"]
 
-            # Get badge for this type, fallback to default
             badge = TYPE_BADGES.get(news_type, DEFAULT_BADGE)
             summary_with_badge = f"{badge}\n{summary}"
 
@@ -402,6 +396,48 @@ def run():
             time.sleep(RATE_LIMIT_SLEEP)
 
         time.sleep(RATE_LIMIT_SLEEP)
+
+    logging.info(f"=== Cycle {cycle_num} complete ===")
+
+# ---------------------------------------------------------------------------
+# 🚀 MAIN — runs for TOTAL_RUNTIME_SECONDS, scanning every CYCLE_INTERVAL_SECONDS
+# ---------------------------------------------------------------------------
+
+def run():
+    run_start = time.time()
+    cycle_num = 0
+
+    # Load history once at startup; both dicts are mutated in-place across cycles
+    seen_links  = load_history()
+    seen_titles = load_title_history()
+
+    while True:
+        elapsed = time.time() - run_start
+        if elapsed >= TOTAL_RUNTIME_SECONDS:
+            logging.info("Total runtime reached. Exiting.")
+            break
+
+        cycle_num += 1
+        cycle_start = time.time()
+
+        run_cycle(seen_links, seen_titles, cycle_num)
+
+        # How long did the cycle take?
+        cycle_duration = time.time() - cycle_start
+        remaining_total = TOTAL_RUNTIME_SECONDS - (time.time() - run_start)
+
+        if remaining_total <= 0:
+            logging.info("Total runtime reached after cycle. Exiting.")
+            break
+
+        # Sleep until next 30-min mark (or until end of total runtime)
+        sleep_time = max(0, min(CYCLE_INTERVAL_SECONDS - cycle_duration, remaining_total))
+        if sleep_time > 0:
+            logging.info(
+                f"Next cycle in {sleep_time/60:.1f} min "
+                f"({remaining_total/60:.0f} min remaining in run)."
+            )
+            time.sleep(sleep_time)
 
 if __name__ == "__main__":
     run()
