@@ -7,7 +7,7 @@ import re
 import logging
 from typing import Set, Optional, List, Tuple
 
-# --- CONFIGURATION ---
+# --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -21,23 +21,24 @@ MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
 
-# ========== SOURCES ==========
+# ========== CLEANED SOURCES ==========
 SOURCES = {
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss",
-    "MOLDPRES - Română": "https://moldpres.md/config/rss.php?lang=rom",
-    "MOLDPRES Sinteza - Română": "https://moldpres.md/config/rssSinteza.php?lang=rom",
-    "Stiri.md": "https://stiri.md/rss",  # Comprehensive news portal [citation:9]
-    "Canal Regional TV": "https://canalregionaltv.md/feed",  
-    "Media TV": "https://mediatv.md/feed", 
-    "MOVCA": "https://movca.md/feed",  
-    "ASE MD": "https://ase.md/feed",  
-    "Biofood": "https://biofood.md/feed", 
+    # Only Romanian MOLDPRES feeds remain
+    "MOLDPRES": "https://moldpres.md/config/rss.php?lang=rom",
+    "MOLDPRES Sinteza": "https://moldpres.md/config/rssSinteza.php?lang=rom",
+    "Stiri.md": "https://stiri.md/rss",
+    "Canal Regional TV": "https://canalregionaltv.md/feed",
+    "Media TV": "https://mediatv.md/feed",
+    "MOVCA": "https://movca.md/feed",
+    "ASE MD": "https://ase.md/feed",
+    "Biofood": "https://biofood.md/feed",
 }
 
-# ========== SOURCE TEMPLATES ==========
+# ========== PER‑SOURCE TEMPLATES (clean, no heavy lines) ==========
 SOURCE_TEMPLATES = {
     "TV8 Moldova": (
         "📺 <b>TV8 Moldova</b>\n\n"
@@ -59,11 +60,16 @@ SOURCE_TEMPLATES = {
         "{summary}\n\n"
         "🔗 <a href='{link}'>Vezi știrea</a>"
     ),
-    "MOLDPRES - Română": (
+    "MOLDPRES": (
         "🏛️ <b>MOLDPRES</b> – Agenția de Stat\n\n"
         "{summary}\n\n"
         "🔗 <a href='{link}'>Sursa oficială</a>"
-   ), 
+    ),
+    "MOLDPRES Sinteza": (
+        "🏛️ <b>MOLDPRES Sinteza</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Sinteza zilei</a>"
+    ),
     "Stiri.md": (
         "📌 <b>Stiri.md</b>\n\n"
         "{summary}\n\n"
@@ -72,27 +78,27 @@ SOURCE_TEMPLATES = {
     "Canal Regional TV": (
         "📺 <b>Canal Regional TV</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Vezi știrea:</a>"
+        "🔗 <a href='{link}'>Vezi știrea</a>"
     ),
     "Media TV": (
         "📡 <b>Media TV</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Continuă să citești:</a>"
+        "🔗 <a href='{link}'>Continuă</a>"
     ),
     "MOVCA": (
         "🎭 <b>MOVCA</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Detalii:</a>"
+        "🔗 <a href='{link}'>Detalii</a>"
     ),
     "ASE MD": (
         "📊 <b>ASE Moldova</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește mai jos:</a>"
+        "🔗 <a href='{link}'>Citește</a>"
     ),
     "Biofood": (
         "🌱 <b>Biofood</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește mai jos:</a>"
+        "🔗 <a href='{link}'>Articol</a>"
     ),
 }
 DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
@@ -134,13 +140,12 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY (using title + description)
+# 🤖 AI: FILTER + SUMMARY (robust error handling)
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[str]:
     url = "https://openrouter.ai/api/v1/chat/completions"
 
-    # Build the input text: title + description (if available)
     content = f"Titlu: {title}\n"
     if description:
         content += f"Descriere: {description}\n"
@@ -167,7 +172,7 @@ Dacă NU este important: răspunde IGNORE
 Dacă ESTE:
 Creează un rezumat într-o singură propoziție în limba română.
 Bazează-te STRICT pe informațiile din titlu și descriere. Nu adăuga detalii care nu apar acolo.
-Folosește funcțiile și titlurile exacte ale persoanelor așa cum sunt menționate în text (de exemplu, "ministrul Finanțelor" dacă așa apare, nu "premierul").
+Folosește funcțiile și titlurile exacte ale persoanelor așa cum sunt menționate în text.
 Rezumatul poate începe cu un emoji relevant.
 
 Răspunde DOAR cu un obiect JSON:
@@ -198,8 +203,13 @@ Răspunde DOAR cu un obiect JSON:
             if text.upper() == "IGNORE":
                 return None
 
-            parsed = json.loads(text)
-            return parsed.get("ro")
+            # Attempt to parse JSON
+            try:
+                parsed = json.loads(text)
+                return parsed.get("ro")
+            except json.JSONDecodeError:
+                logging.error(f"AI response not valid JSON: {text}")
+                return None
 
     except Exception as e:
         logging.error(f"AI filter error: {e}")
@@ -255,13 +265,10 @@ Răspunde DOAR: YES sau NO
         return False
 
 # ---------------------------------------------------------------------------
-# 📡 RSS
+# 📡 RSS – robust extraction, never crashes the whole bot
 # ---------------------------------------------------------------------------
 
 def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
-    """
-    Returns list of (link, title, description)
-    """
     items = []
     try:
         req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -276,18 +283,20 @@ def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
                 if title_elem is None or link_elem is None:
                     continue
 
-                title = title_elem.text.strip()
-                link = link_elem.text.strip()
-                description = desc_elem.text.strip() if desc_elem is not None else ""
+                title = title_elem.text.strip() if title_elem.text else ""
+                link = link_elem.text.strip() if link_elem.text else ""
+                description = desc_elem.text.strip() if desc_elem is not None and desc_elem.text else ""
 
-                items.append((link, title, description))
+                if title and link:  # only add if we have essential fields
+                    items.append((link, title, description))
     except Exception as e:
         logging.error(f"RSS error for {feed_url}: {e}")
+        # Return empty list – source will be skipped silently
 
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM 
+# 📲 TELEGRAM – clean posting
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
@@ -324,6 +333,9 @@ def run():
 
     for source, feed in SOURCES.items():
         items = fetch_rss_items(feed)
+        if not items:
+            logging.info(f"No items from {source}, skipping.")
+            continue
 
         for link, title, description in items:
 
@@ -337,7 +349,7 @@ def run():
                 continue
 
             summary = ask_ai_filter_and_summarize(title, description)
-            if not summary:
+            if not summary:   # None means ignore or error
                 continue
 
             post_to_telegram(source, summary, link)
