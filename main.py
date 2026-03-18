@@ -21,38 +21,85 @@ MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
 
+# ========== SOURCES ==========
 SOURCES = {
+    # Your existing sources
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
     "Newsmaker MD": "https://newsmaker.md/feed",
-    "Realitatea.md": "https://realitatea.md/rss"
+    "Realitatea.md": "https://realitatea.md/rss",
+    "MOLDPRES - Română": "https://moldpres.md/config/rss.php?lang=rom",
+    "MOLDPRES - Русский": "https://moldpres.md/config/rss.php?lang=rus",
+    "MOLDPRES - English": "https://moldpres.md/config/rss.php?lang=eng",
+    "MOLDPRES Sinteza - Română": "https://moldpres.md/config/rssSinteza.php?lang=rom",
+    "Stiri.md": "https://stiri.md/rss",  # Comprehensive news portal [citation:9]
+    "Canal Regional TV": "https://canalregionaltv.md/feed",  # Regional news [citation:8]
+    "Media TV": "https://mediatv.md/feed",  # News outlet [citation:8]
+    "MOVCA": "https://movca.md/feed",  # News/cultural content [citation:8]
+    "ASE MD": "https://ase.md/feed",  # Economic news (university, but may have econ content) [citation:8]
+    "Biofood": "https://biofood.md/feed",  # Agriculture/food news [citation:8]
 }
-# ==========SOURCE TEMPLATES==========
+
+# ========== SOURCE TEMPLATES ==========
 SOURCE_TEMPLATES = {
     "TV8 Moldova": (
-        "📺 <b>TV8 Moldova</b>\n"
-        "▬▬▬▬▬▬▬▬▬▬▬▬\n\n"
+        "📺 <b>TV8 Moldova</b>\n\n"
         "{summary}\n\n"
         "🔗 <a href='{link}'>Vezi pe TV8.md</a>"
     ),
     "Ziarul de Gardă": (
-        "📰 <b>Ziarul de Gardă</b>\n"
-        "─────────────────\n\n"
+        "📰 <b>Ziarul de Gardă</b>\n\n"
         "{summary}\n\n"
         "🔗 <a href='{link}'>Continuă pe ZDG.md</a>"
     ),
     "Newsmaker MD": (
-        "📢 <b>Newsmaker MD</b>\n"
-        "═══════════════════\n\n"
+        "📢 <b>Newsmaker MD</b>\n\n"
         "{summary}\n\n"
         "🔗 <a href='{link}'>Citește integral</a>"
     ),
     "Realitatea.md": (
-        "📡 <b>Realitatea.md</b>\n"
-        "─────────────────\n\n"
+        "📡 <b>Realitatea.md</b>\n\n"
         "{summary}\n\n"
         "🔗 <a href='{link}'>Vezi știrea</a>"
-    )
+    ),
+    "MOLDPRES - Română": (
+        "🏛️ <b>MOLDPRES</b> – Agenția de Stat\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Sursa oficială</a>"
+    ),
+    ),
+    ),
+    ),
+    "Stiri.md": (
+        "📌 <b>Stiri.md</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Citește pe Stiri.md</a>"
+    ),
+    "Canal Regional TV": (
+        "📺 <b>Canal Regional TV</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Vezi știrea:</a>"
+    ),
+    "Media TV": (
+        "📡 <b>Media TV</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Continuă să citești:</a>"
+    ),
+    "MOVCA": (
+        "🎭 <b>MOVCA</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Detalii:</a>"
+    ),
+    "ASE MD": (
+        "📊 <b>ASE Moldova</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Citește mai jos:</a>"
+    ),
+    "Biofood": (
+        "🌱 <b>Biofood</b>\n\n"
+        "{summary}\n\n"
+        "🔗 <a href='{link}'>Citește mai jos:</a>"
+    ),
 }
 DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
 
@@ -93,7 +140,7 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY
+# 🤖 AI: FILTER + SUMMARY (using title + description)
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[str]:
@@ -137,7 +184,7 @@ Răspunde DOAR cu un obiect JSON:
         "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
-        "max_tokens": 100  # slightly larger to accommodate description
+        "max_tokens": 100
     }
 
     try:
@@ -165,7 +212,7 @@ Răspunde DOAR cu un obiect JSON:
         return None
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: SAME EVENT DETECTION 
+# 🤖 AI: SAME EVENT DETECTION
 # ---------------------------------------------------------------------------
 
 def is_same_event(new_title: str, past_titles: List[str]) -> bool:
@@ -214,7 +261,7 @@ Răspunde DOAR: YES sau NO
         return False
 
 # ---------------------------------------------------------------------------
-# 📡 RSS
+# 📡 RSS – extracts description
 # ---------------------------------------------------------------------------
 
 def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
@@ -246,21 +293,14 @@ def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM – PER‑SOURCE TEMPLATES
+# 📲 TELEGRAM – CLEAN, MINIMAL DESIGN
 # ---------------------------------------------------------------------------
 
-def post_to_telegram(source: str, summary: str, link: str, original_title: str = ""):
+def post_to_telegram(source: str, summary: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     template = SOURCE_TEMPLATES.get(source, DEFAULT_TEMPLATE)
-
-    # If you want to include the original title in the message, you can extend the template
-    # For now we only use summary and link.
     message = template.format(summary=summary, link=link)
-
-    # Optional: prepend original title (commented out by default)
-    # if original_title:
-    #     message = f"📰 <b>{original_title}</b>\n\n" + message
 
     payload = {
         "chat_id": CHAT_ID,
@@ -275,7 +315,7 @@ def post_to_telegram(source: str, summary: str, link: str, original_title: str =
             headers={"Content-Type": "application/json"}
         )
         urllib.request.urlopen(req)
-        logging.info("Posted successfully")
+        logging.info(f"Posted successfully from {source}")
 
     except Exception as e:
         logging.error(f"Telegram error: {e}")
@@ -306,7 +346,7 @@ def run():
             if not summary:
                 continue
 
-            post_to_telegram(source, summary, link, original_title=title)
+            post_to_telegram(source, summary, link)
 
             save_to_history(link)
             save_title_history(title)
