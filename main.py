@@ -5,8 +5,9 @@ import time
 import os
 import re
 import logging
-from typing import Set, Optional, List
+from typing import Set, Optional, List, Tuple
 
+# --- CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -26,6 +27,7 @@ SOURCES = {
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss"
 }
+# ==========SOURCE TEMPLATES==========
 SOURCE_TEMPLATES = {
     "TV8 Moldova": (
         "📺 <b>TV8 Moldova</b>\n"
@@ -52,7 +54,6 @@ SOURCE_TEMPLATES = {
         "🔗 <a href='{link}'>Vezi știrea</a>"
     )
 }
-# Default template if source not found
 DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
 
 # ---------------------------------------------------------------------------
@@ -92,42 +93,51 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI Prompt: FILTER + SUMMARY + emoji encouragement
+# 🤖 AI: FILTER + SUMMARY
 # ---------------------------------------------------------------------------
 
-def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
+def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[str]:
     url = "https://openrouter.ai/api/v1/chat/completions"
+
+    # Build the input text: title + description (if available)
+    content = f"Titlu: {title}\n"
+    if description:
+        content += f"Descriere: {description}\n"
 
     prompt = f"""
 Ești editor pentru un canal de știri foarte selectiv.
 
-Titlu: "{title}"
+{content}
 
-Permite DOAR știri cu impact major din următoarele categorii:
+Categorii permise:
 - politică națională și internațională (decizii guvernamentale, alegeri, relații externe)
 - conflicte și crize (războaie, tensiuni, dezastre, urgențe)
 - economie majoră (macroeconomic, politici fiscale, crize economice)
-- fintech și inovații financiare (bănci, criptomonede, plăți digitale, reglementări financiare)
+- fintech și inovații financiare (bănci, criptomonede, plăți digitale, reglementări)
 - crimă și justiție (infracțiuni grave, anchete, decizii judecătorești importante)
 
 Respinge:
 - știri minore (evenimente locale fără impact național)
 - opinii și editoriale
-- știri din divertisment, sport, lifestyle (dacă nu au legătură cu categoriile de mai sus)
-- știri despre vreme, animale, cultură (dacă nu sunt excepționale)
+- divertisment, sport, lifestyle (dacă nu au legătură cu categoriile de mai sus)
 
 Dacă NU este important: răspunde IGNORE
 
 Dacă ESTE:
+Creează un rezumat într-o singură propoziție în limba română.
+Bazează-te STRICT pe informațiile din titlu și descriere. Nu adăuga detalii care nu apar acolo.
+Folosește funcțiile și titlurile exacte ale persoanelor așa cum sunt menționate în text (de exemplu, "ministrul Finanțelor" dacă așa apare, nu "premierul").
+Rezumatul poate începe cu un emoji relevant.
+
 Răspunde DOAR cu un obiect JSON:
-{{"ro": "rezumat foarte scurt, 1 propoziție, care poate începe cu un emoji relevant"}}
+{{"ro": "rezumatul tău aici"}}
 """
 
     payload = {
         "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
-        "max_tokens": 80
+        "max_tokens": 100  # slightly larger to accommodate description
     }
 
     try:
@@ -155,7 +165,7 @@ Răspunde DOAR cu un obiect JSON:
         return None
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: SAME EVENT DETECTION
+# 🤖 AI: SAME EVENT DETECTION 
 # ---------------------------------------------------------------------------
 
 def is_same_event(new_title: str, past_titles: List[str]) -> bool:
@@ -207,7 +217,10 @@ Răspunde DOAR: YES sau NO
 # 📡 RSS
 # ---------------------------------------------------------------------------
 
-def fetch_rss_items(feed_url: str):
+def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
+    """
+    Returns list of (link, title, description)
+    """
     items = []
     try:
         req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -215,11 +228,20 @@ def fetch_rss_items(feed_url: str):
             root = ET.fromstring(response.read())
 
             for item in root.findall('.//item')[:MAX_ITEMS_PER_SOURCE]:
-                title = item.find('title').text.strip()
-                link = item.find('link').text.strip()
-                items.append((link, title))
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                desc_elem = item.find('description')
+
+                if title_elem is None or link_elem is None:
+                    continue
+
+                title = title_elem.text.strip()
+                link = link_elem.text.strip()
+                description = desc_elem.text.strip() if desc_elem is not None else ""
+
+                items.append((link, title, description))
     except Exception as e:
-        logging.error(f"RSS error: {e}")
+        logging.error(f"RSS error for {feed_url}: {e}")
 
     return items
 
@@ -227,15 +249,18 @@ def fetch_rss_items(feed_url: str):
 # 📲 TELEGRAM – PER‑SOURCE TEMPLATES
 # ---------------------------------------------------------------------------
 
-def post_to_telegram(source: str, summary: str, link: str):
+def post_to_telegram(source: str, summary: str, link: str, original_title: str = ""):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    # Get the template for this source, or fallback to default
     template = SOURCE_TEMPLATES.get(source, DEFAULT_TEMPLATE)
 
-    # If you want to include the original title, you would need to pass it as an argument.
-    # For now we only have summary and link.
+    # If you want to include the original title in the message, you can extend the template
+    # For now we only use summary and link.
     message = template.format(summary=summary, link=link)
+
+    # Optional: prepend original title (commented out by default)
+    # if original_title:
+    #     message = f"📰 <b>{original_title}</b>\n\n" + message
 
     payload = {
         "chat_id": CHAT_ID,
@@ -256,7 +281,7 @@ def post_to_telegram(source: str, summary: str, link: str):
         logging.error(f"Telegram error: {e}")
 
 # ---------------------------------------------------------------------------
-# 🚀 MAIN CODE
+# 🚀 MAIN
 # ---------------------------------------------------------------------------
 
 def run():
@@ -266,7 +291,7 @@ def run():
     for source, feed in SOURCES.items():
         items = fetch_rss_items(feed)
 
-        for link, title in items:
+        for link, title, description in items:
 
             if is_repost(title):
                 continue
@@ -277,11 +302,11 @@ def run():
             if is_same_event(title, seen_titles):
                 continue
 
-            summary = ask_ai_filter_and_summarize(title)
+            summary = ask_ai_filter_and_summarize(title, description)
             if not summary:
                 continue
 
-            post_to_telegram(source, summary, link)
+            post_to_telegram(source, summary, link, original_title=title)
 
             save_to_history(link)
             save_title_history(title)
