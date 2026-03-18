@@ -17,7 +17,7 @@ TITLE_HISTORY_FILE = "posted_titles.txt"
 
 REQUEST_TIMEOUT = 15
 RATE_LIMIT_SLEEP = 2
-MAX_ITEMS_PER_SOURCE = 5
+MAX_ITEMS_PER_SOURCE = 3  # Reduced from 5 to lower volume
 
 logging.basicConfig(level=logging.INFO)
 
@@ -155,7 +155,7 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY + TYPE
+# 🤖 AI: FILTER + SUMMARY + TYPE (STRICTER PROMPT)
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[Dict[str, str]]:
@@ -169,34 +169,34 @@ def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[D
         content += f"Descriere: {description}\n"
 
     prompt = f"""
-Ești editor pentru un canal de știri foarte selectiv.
+Ești editor pentru un canal de știri foarte selectiv, care publică DOAR știri cu impact major național sau internațional.
 
 {content}
 
-Categorii permise:
-- politică națională și internațională (decizii guvernamentale, alegeri, relații externe)
-- conflicte și crize (războaie, tensiuni, dezastre, urgențe)
-- economie majoră (macroeconomic, politici fiscale, crize economice)
-- fintech și inovații financiare (bănci, criptomonede, plăți digitale, reglementări)
-- crimă și justiție (infracțiuni grave, anchete, decizii judecătorești importante)
+📌 **Categorii acceptate** (doar dacă au impact semnificativ):
+- Politică majoră: decizii guvernamentale, legi importante, alegeri, crize politice, relații externe
+- Economie majoră: buget, taxe, crize economice, acorduri financiare internaționale
+- Conflicte și securitate: războaie, atacuri, tensiuni grave, dezastre
+- Justiție de mare interes: anchete de corupție la nivel înalt, sentințe importante
+- Fintech/bani: reglementări financiare majore, inovații cu impact larg
 
-Respinge:
-- știri minore (evenimente locale fără impact național)
-- opinii și editoriale
-- divertisment, sport, lifestyle (dacă nu au legătură cu categoriile de mai sus)
+🚫 **Respinge categoric** (indiferent de sursă):
+- Evenimente locale fără ecou național (ex: inaugurări de magazine, accidente minore, evenimente culturale locale)
+- Știri din sport, divertisment, lifestyle, vreme, animale, oameni, vedete
+- Anunțuri de rutină (ex: întreruperi apă/curent, concursuri, burse)
+- Opinii, editoriale, interviuri fără valoare de știre
+- Știri care sunt în esență reclame sau promovări
+- Subiecte care nu afectează direct Moldova sau nu au relevanță pentru publicul moldovean
 
-Dacă NU este important: răspunde IGNORE
+❗ **Reguli stricte**:
+- Dacă știrea nu este clar în categoriile acceptate și de impact major → răspunde IGNORE
+- Nu inventa detalii. Folosește strict informațiile din titlu și descriere.
+- Păstrează titlurile oficiale ale persoanelor (ex: "ministrul Finanțelor" nu "premierul").
+- Rezumatul: o singură propoziție, în română, clară și concisă. Poate începe cu un emoji relevant.
+- Clasifică știrea în unul dintre tipurile: breaking, politics, economy, crime, conflict, fintech, analysis, opinion, local, international, other.
 
-Dacă ESTE:
-Creează un rezumat într-o singură propoziție în limba română.
-Bazează-te STRICT pe informațiile din titlu și descriere. Nu adăuga detalii care nu apar acolo.
-Folosește funcțiile și titlurile exacte ale persoanelor așa cum sunt menționate în text.
-Rezumatul poate începe cu un emoji relevant.
-
-De asemenea, clasifică știrea într-unul dintre tipurile: breaking, politics, economy, crime, conflict, fintech, analysis, opinion, local, international, other.
-
-Răspunde DOAR cu un obiect JSON cu două câmpuri:
-{{"ro": "rezumatul tău aici", "type": "tipul"}}
+Răspunde DOAR cu un obiect JSON:
+{{"ro": "rezumat", "type": "tip"}}
 """
 
     payload = {
