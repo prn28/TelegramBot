@@ -5,7 +5,7 @@ import time
 import os
 import re
 import logging
-from typing import Set, Optional, List, Tuple
+from typing import Set, Optional, List, Tuple, Dict, Any
 
 # --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -21,13 +21,12 @@ MAX_ITEMS_PER_SOURCE = 5
 
 logging.basicConfig(level=logging.INFO)
 
-# ========== CLEANED SOURCES ==========
+# ========== SOURCES ==========
 SOURCES = {
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss",
-    # Only Romanian MOLDPRES feeds remain
     "MOLDPRES": "https://moldpres.md/config/rss.php?lang=rom",
     "MOLDPRES Sinteza": "https://moldpres.md/config/rssSinteza.php?lang=rom",
     "Stiri.md": "https://stiri.md/rss",
@@ -38,70 +37,86 @@ SOURCES = {
     "Biofood": "https://biofood.md/feed",
 }
 
-# ========== PER‑SOURCE TEMPLATES (clean, no heavy lines) ==========
+# ========== PER‑SOURCE TEMPLATES (clean, professional) ==========
 SOURCE_TEMPLATES = {
     "TV8 Moldova": (
         "📺 <b>TV8 Moldova</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Vezi pe TV8.md</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Ziarul de Gardă": (
         "📰 <b>Ziarul de Gardă</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Continuă pe ZDG.md</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Newsmaker MD": (
         "📢 <b>Newsmaker MD</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește integral</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Realitatea.md": (
         "📡 <b>Realitatea.md</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Vezi știrea</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "MOLDPRES": (
-        "🏛️ <b>MOLDPRES</b> – Agenția de Stat\n\n"
+        "🏛️ <b>MOLDPRES</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Sursa oficială</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "MOLDPRES Sinteza": (
         "🏛️ <b>MOLDPRES Sinteza</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Sinteza zilei</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Stiri.md": (
         "📌 <b>Stiri.md</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește pe Stiri.md</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Canal Regional TV": (
         "📺 <b>Canal Regional TV</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Vezi știrea</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Media TV": (
         "📡 <b>Media TV</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Continuă</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "MOVCA": (
         "🎭 <b>MOVCA</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Detalii</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "ASE MD": (
         "📊 <b>ASE Moldova</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
     "Biofood": (
         "🌱 <b>Biofood</b>\n\n"
         "{summary}\n\n"
-        "🔗 <a href='{link}'>Articol</a>"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ),
 }
 DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
+
+# Map news types to Romanian badges
+TYPE_BADGES = {
+    "breaking": "🔴 BREAKING",
+    "politics": "🏛️ POLITIC",
+    "economy": "💰 ECONOMIE",
+    "crime": "⚖️ JUSTIȚIE",
+    "conflict": "⚔️ CONFLICT",
+    "fintech": "💳 FINTECH",
+    "analysis": "📊 ANALIZĂ",
+    "opinion": "💬 OPINIE",
+    "local": "📍 LOCAL",
+    "international": "🌍 INTERNAȚIONAL",
+    "other": "📰 ȘTIRI",
+}
+DEFAULT_BADGE = "📰 ȘTIRI"
 
 # ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
@@ -140,10 +155,13 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY (robust error handling)
+# 🤖 AI: FILTER + SUMMARY + TYPE
 # ---------------------------------------------------------------------------
 
-def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[str]:
+def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[Dict[str, str]]:
+    """
+    Returns dict with 'ro' (summary) and 'type' (category) or None if ignored/error.
+    """
     url = "https://openrouter.ai/api/v1/chat/completions"
 
     content = f"Titlu: {title}\n"
@@ -175,15 +193,17 @@ Bazează-te STRICT pe informațiile din titlu și descriere. Nu adăuga detalii 
 Folosește funcțiile și titlurile exacte ale persoanelor așa cum sunt menționate în text.
 Rezumatul poate începe cu un emoji relevant.
 
-Răspunde DOAR cu un obiect JSON:
-{{"ro": "rezumatul tău aici"}}
+De asemenea, clasifică știrea într-unul dintre tipurile: breaking, politics, economy, crime, conflict, fintech, analysis, opinion, local, international, other.
+
+Răspunde DOAR cu un obiect JSON cu două câmpuri:
+{{"ro": "rezumatul tău aici", "type": "tipul"}}
 """
 
     payload = {
         "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
-        "max_tokens": 100
+        "max_tokens": 120
     }
 
     try:
@@ -200,13 +220,26 @@ Răspunde DOAR cu un obiect JSON:
             data = json.loads(res.read())
             text = data["choices"][0]["message"]["content"].strip()
 
-            if text.upper() == "IGNORE":
+            if "ignore" in text.lower():
                 return None
 
-            # Attempt to parse JSON
+            # Try to extract JSON from response (in case AI adds extra text)
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                json_str = match.group()
+            else:
+                json_str = text
+
             try:
-                parsed = json.loads(text)
-                return parsed.get("ro")
+                parsed = json.loads(json_str)
+                if "ro" in parsed:
+                    return {
+                        "summary": parsed["ro"],
+                        "type": parsed.get("type", "other").lower()
+                    }
+                else:
+                    logging.error(f"AI response missing 'ro' field: {parsed}")
+                    return None
             except json.JSONDecodeError:
                 logging.error(f"AI response not valid JSON: {text}")
                 return None
@@ -265,7 +298,7 @@ Răspunde DOAR: YES sau NO
         return False
 
 # ---------------------------------------------------------------------------
-# 📡 RSS – robust extraction, never crashes the whole bot
+# 📡 RSS
 # ---------------------------------------------------------------------------
 
 def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
@@ -287,23 +320,22 @@ def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
                 link = link_elem.text.strip() if link_elem.text else ""
                 description = desc_elem.text.strip() if desc_elem is not None and desc_elem.text else ""
 
-                if title and link:  # only add if we have essential fields
+                if title and link:
                     items.append((link, title, description))
     except Exception as e:
         logging.error(f"RSS error for {feed_url}: {e}")
-        # Return empty list – source will be skipped silently
 
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM – clean posting
+# 📲 TELEGRAM
 # ---------------------------------------------------------------------------
 
-def post_to_telegram(source: str, summary: str, link: str):
+def post_to_telegram(source: str, summary_with_badge: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     template = SOURCE_TEMPLATES.get(source, DEFAULT_TEMPLATE)
-    message = template.format(summary=summary, link=link)
+    message = template.format(summary=summary_with_badge, link=link)
 
     payload = {
         "chat_id": CHAT_ID,
@@ -348,11 +380,18 @@ def run():
             if is_same_event(title, seen_titles):
                 continue
 
-            summary = ask_ai_filter_and_summarize(title, description)
-            if not summary:   # None means ignore or error
+            result = ask_ai_filter_and_summarize(title, description)
+            if not result:
                 continue
 
-            post_to_telegram(source, summary, link)
+            summary = result["summary"]
+            news_type = result["type"]
+
+            # Get badge for this type, fallback to default
+            badge = TYPE_BADGES.get(news_type, DEFAULT_BADGE)
+            summary_with_badge = f"{badge}\n{summary}"
+
+            post_to_telegram(source, summary_with_badge, link)
 
             save_to_history(link)
             save_title_history(title)
