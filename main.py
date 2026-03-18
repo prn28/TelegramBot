@@ -7,7 +7,6 @@ import re
 import logging
 from typing import Set, Optional, List
 
-# --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -27,8 +26,6 @@ SOURCES = {
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss"
 }
-
-# ========== PER‑SOURCE TEMPLATES ==========
 SOURCE_TEMPLATES = {
     "TV8 Moldova": (
         "📺 <b>TV8 Moldova</b>\n"
@@ -95,7 +92,7 @@ def save_title_history(title: str):
         f.write(normalize_title(title) + "\n")
 
 # ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY (with emoji encouragement)
+# 🤖 AI Prompt: FILTER + SUMMARY + emoji encouragement
 # ---------------------------------------------------------------------------
 
 def ask_ai_filter_and_summarize(title: str) -> Optional[str]:
@@ -227,7 +224,7 @@ def fetch_rss_items(feed_url: str):
     return items
 
 # ---------------------------------------------------------------------------
-# 📲 TELEGRAM – USING PER‑SOURCE TEMPLATES
+# 📲 TELEGRAM – PER‑SOURCE TEMPLATES
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, link: str):
@@ -259,7 +256,7 @@ def post_to_telegram(source: str, summary: str, link: str):
         logging.error(f"Telegram error: {e}")
 
 # ---------------------------------------------------------------------------
-# 🚀 MAIN
+# 🚀 MAIN CODE
 # ---------------------------------------------------------------------------
 
 def run():
