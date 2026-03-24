@@ -20,7 +20,7 @@ RATE_LIMIT_SLEEP = 2
 MAX_ITEMS_PER_SOURCE = 3
 
 # --- LOOP CONFIG ---
-CYCLE_INTERVAL_SECONDS = 30 * 60   # 30 minutes between cycles
+CYCLE_INTERVAL_SECONDS = 60 * 60      # 1 hour between cycles
 TOTAL_RUNTIME_SECONDS  = int(5.5 * 3600)  # 5 hours 30 minutes = 19800 s
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -62,16 +62,16 @@ def get_emoji(source: str) -> str:
     }
     return emojis.get(source, "📌")
 
-#PER‑SOURCE TEMPLATES
+# PER-SOURCE TEMPLATES — use single braces for .format()
 SOURCE_TEMPLATES = {
     source: (
         f"{get_emoji(source)} <b>{source}</b>\n"
         "—\n"
-        "<i>{{summary}}</i>\n\n"
-        "🔗 <a href='{{link}}'>Citește articolul</a>"
+        "<i>{summary}</i>\n\n"
+        "🔗 <a href='{link}'>Citește articolul</a>"
     ) for source in SOURCES
 }
-DEFAULT_TEMPLATE = "📌 <b>Știri</b>\n—\n<i>{{summary}}</i>\n\n🔗 <a href='{{link}}'>Citește articolul</a>"
+DEFAULT_TEMPLATE = "📌 <b>Știri</b>\n—\n<i>{summary}</i>\n\n🔗 <a href='{link}'>Citește articolul</a>"
 
 TYPE_BADGES = {
     "alert": "🚨 ALERTĂ 🚨",
@@ -121,7 +121,7 @@ def save_title_history(title: str):
     with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(normalize_title(title) + "\n")
 
-# 🤖 AI: FILTER + SUMMARY + TYPE 
+# 🤖 AI: FILTER + SUMMARY + TYPE + DEDUP IN ONE CALL
 
 def extract_json(text: str) -> Optional[dict]:
     match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -145,18 +145,23 @@ def extract_json(text: str) -> Optional[dict]:
             return result
         return None
 
-def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[Dict[str, str]]:
+def ask_ai_filter_summarize_dedup(title: str, description: str, past_titles: List[str]) -> Optional[Dict[str, str]]:
+    """Single AI call: filter relevance, check dedup, and summarize."""
     url = "https://openrouter.ai/api/v1/chat/completions"
 
     content = f"Titlu: {title}\n"
     if description:
         content += f"Descriere: {description}\n"
 
-    prompt = f"""
+    recent = past_titles[-30:]
+    past_block = "\n".join(recent) if recent else "(niciuna)"
 
-    Ești editor pentru un canal de știri foarte selectiv, care publică DOAR știri cu impact major național sau internațional.
+    prompt = f"""Ești editor pentru un canal de știri foarte selectiv despre Republica Moldova.
 
 {content}
+
+Știri deja publicate (ultimele {len(recent)}):
+{past_block}
 
 📌 **Categorii acceptate** (doar dacă au impact semnificativ):
 - Politică majoră: decizii guvernamentale, legi importante, alegeri, crize politice, relații externe
@@ -169,31 +174,32 @@ def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[D
 - Fintech și inovații financiare: bănci, criptomonede, plăți digitale, reglementări financiare, startup-uri
 - Justiție de mare interes: anchete de corupție la nivel înalt, sentințe importante, cazuri de crimă organizată
 - Securitate și conflicte: război din Ucraina, impact asupra Moldovei, tensiuni în regiune, crize de securitate
-- Evenimente internaționale care afectează direct Moldova sau au o relevanță clară pentru cetățenii moldoveni (ex: sancțiuni, acorduri UE, evoluții în țările vecine)
-- Include știri despre vedete dacă sunt cumva relevante la viața politico, socio-economică a Republicii Moldova
+- Evenimente internaționale care afectează direct Moldova sau au relevanță clară pentru cetățenii moldoveni
+- Include știri despre vedete dacă sunt relevante la viața politico, socio-economică a Republicii Moldova
 - Include opinii de la politiceni, editoriale, și comentarii din interviuri (doar dacă sunt pe un subiect important din punct de vedere socio-economic)
 
-🚫 **Respinge categoric** (indiferent de sursă):
+🚫 **Respinge categoric**:
 - Evenimente locale fără ecou național (ex: inaugurări de magazine, accidente minore, evenimente culturale locale)
-- Știri din sport, divertisment, lifestyle, vreme, animale, oameni, vedete
+- Știri din sport, divertisment, lifestyle, vreme, animale, oameni, vedete (dacă nu sunt relevante politic/economic)
 - Anunțuri de rutină (ex: întreruperi apă/curent, concursuri, burse)
-- Opinii, editoriale, interviuri fără valoare de știre
 - Știri care sunt în esență reclame sau promovări
-- Subiecte care nu afectează direct Moldova sau nu au relevanță pentru publicul moldovean
+- Subiecte care nu afectează direct Moldova
 
-🚨 **Două categorii speciale** (folosește-le după cum urmează):
-- **alert** – pentru evenimente grave: catastrofe naturale, accidente majore cu victime multiple, dezastre, stări de urgență națională, calamități (indiferent dacă se întâmplă în Moldova sau în lume, dar cu impact relevant)
-- **breaking** – pentru crize de securitate, escaladări militare grave, cazuri de corupție la cel mai înalt nivel, demisii bruște ale unor oficiali majori, evenimente care schimbă fundamental situația politică sau de securitate
+🚨 **Categorii speciale**:
+- **alert** – catastrofe naturale, accidente majore cu victime multiple, stări de urgență națională
+- **breaking** – crize de securitate, escaladări militare, corupție la cel mai înalt nivel, demisii bruște ale unor oficiali majori
 
 ❗ **Reguli stricte**:
-- Dacă știrea nu este clar în categoriile acceptate și de impact major → răspunde IGNORE
+- Dacă știrea nu este clar în categoriile acceptate → răspunde cu {{"ignore": true}}
+- Dacă știrea acoperă același eveniment ca una din cele deja publicate → răspunde cu {{"ignore": true}}
 - Nu inventa detalii. Folosește strict informațiile din titlu și descriere.
-- Păstrează titlurile oficiale ale persoanelor (ex: "ministrul Finanțelor" nu "premierul").
-- Rezumatul: o singură propoziție, în română, clară și concisă. Poate începe cu un emoji relevant.
-- Clasifică știrea în unul dintre tipurile: breaking, politics, economy, crime, conflict, fintech, analysis, opinion, local, international, other.
+- Rezumatul: o singură propoziție, în română, clară și concisă.
+- Tipuri valide: breaking, alert, politics, economy, crime, conflict, fintech, analysis, opinion, local, international, other
 
-Răspunde DOAR cu un obiect JSON:
+Răspunde DOAR cu JSON:
 {{"ro": "rezumat", "type": "tip"}}
+sau
+{{"ignore": true}}
 """
 
     payload = {
@@ -221,67 +227,23 @@ Răspunde DOAR cu un obiect JSON:
                 return None
 
             parsed = extract_json(text)
-            if parsed and "ro" in parsed:
-                return {
-                    "summary": parsed["ro"],
-                    "type": parsed.get("type", "other").lower()
-                }
-            else:
-                logging.error(f"Could not extract valid JSON from AI response: {text}")
-                return None
+            if parsed:
+                if parsed.get("ignore"):
+                    return None
+                if "ro" in parsed:
+                    return {
+                        "summary": parsed["ro"],
+                        "type": parsed.get("type", "other").lower()
+                    }
+
+            logging.error(f"Could not extract valid JSON from AI response: {text}")
+            return None
 
     except Exception as e:
         logging.error(f"AI filter error: {e}")
         return None
 
-# 🤖 AI: SAME EVENT DETECTION
-
-def is_same_event(new_title: str, past_titles: List[str]) -> bool:
-    if not past_titles:
-        return False
-
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    recent = past_titles[-20:]
-
-    prompt = f"""
-Titlu nou:
-"{new_title}"
-
-Știri existente:
-{chr(10).join(recent)}
-
-Este același eveniment?
-
-Răspunde DOAR: YES sau NO
-"""
-
-    payload = {
-        "model": "openrouter/auto",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-        "max_tokens": 5
-    }
-
-    try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
-            data = json.loads(res.read())
-            answer = data["choices"][0]["message"]["content"].strip().upper()
-            return "YES" in answer
-
-    except Exception as e:
-        logging.error(f"AI dedup error: {e}")
-        return False
-
-# 📡 RSS 
+# 📡 RSS
 
 def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
     items = []
@@ -309,7 +271,7 @@ def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
 
     return items
 
-# 📲 TELEGRAM CONNECTION
+# 📲 TELEGRAM
 
 def post_to_telegram(source: str, summary_with_badge: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -335,7 +297,7 @@ def post_to_telegram(source: str, summary_with_badge: str, link: str):
     except Exception as e:
         logging.error(f"Telegram error: {e}")
 
-#🔄 ONE SCAN CYCLE
+# 🔄 ONE SCAN CYCLE
 
 def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
     logging.info(f"=== Cycle {cycle_num} starting ===")
@@ -354,10 +316,8 @@ def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
             if link in seen_links:
                 continue
 
-            if is_same_event(title, seen_titles):
-                continue
-
-            result = ask_ai_filter_and_summarize(title, description)
+            # Single AI call handles filtering, dedup, and summarization
+            result = ask_ai_filter_summarize_dedup(title, description, seen_titles)
             if not result:
                 continue
 
@@ -381,7 +341,7 @@ def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
 
     logging.info(f"=== Cycle {cycle_num} complete ===")
 
-# 🚀 MAIN CODE
+# 🚀 MAIN
 
 def run():
     run_start = time.time()
