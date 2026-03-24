@@ -43,17 +43,6 @@ SOURCES = {
     "Știri.md": "https://stiri.md/feed",
 }
 
-#PER‑SOURCE TEMPLATES
-SOURCE_TEMPLATES = {
-    source: (
-        f"{get_emoji(source)} <b>{source}</b>\n"
-        "—\n"
-        "<i>{{summary}}</i>\n\n"
-        "🔗 <a href='{{link}}'>Citește articolul</a>"
-    ) for source in SOURCES
-}
-DEFAULT_TEMPLATE = "📌 <b>Știri</b>\n—\n<i>{{summary}}</i>\n\n🔗 <a href='{{link}}'>Citește articolul</a>"
-
 def get_emoji(source: str) -> str:
     emojis = {
         "TV8 Moldova": "📺",
@@ -72,6 +61,17 @@ def get_emoji(source: str) -> str:
         "Știri.md": "🗞️",
     }
     return emojis.get(source, "📌")
+
+#PER‑SOURCE TEMPLATES
+SOURCE_TEMPLATES = {
+    source: (
+        f"{get_emoji(source)} <b>{source}</b>\n"
+        "—\n"
+        "<i>{{summary}}</i>\n\n"
+        "🔗 <a href='{{link}}'>Citește articolul</a>"
+    ) for source in SOURCES
+}
+DEFAULT_TEMPLATE = "📌 <b>Știri</b>\n—\n<i>{{summary}}</i>\n\n🔗 <a href='{{link}}'>Citește articolul</a>"
 
 TYPE_BADGES = {
     "alert": "🚨 ALERTĂ 🚨",
