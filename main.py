@@ -7,7 +7,7 @@ import re
 import logging
 from typing import Set, Optional, List, Tuple, Dict, Any
 
-# --- CONFIG ---
+#CONFIGURATION
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -33,97 +33,63 @@ SOURCES = {
     "Realitatea.md": "https://realitatea.md/rss",
     "MOLDPRES": "https://moldpres.md/config/rss.php?lang=rom",
     "MOLDPRES Sinteza": "https://moldpres.md/config/rssSinteza.php?lang=rom",
-    "Stiri.md": "https://stiri.md/rss",
-    "Canal Regional TV": "https://canalregionaltv.md/feed",
     "Media TV": "https://mediatv.md/feed",
     "MOVCA": "https://movca.md/feed",
     "ASE MD": "https://ase.md/feed",
-    "Biofood": "https://biofood.md/feed",
+    "IPN": "https://www.ipn.md/rss",
+    "Agora.md": "https://agora.md/rss",
+    "Jurnal.md": "https://jurnal.md/rss",
+    "Timpul.md": "https://timpul.md/feed",
+    "Știri.md": "https://stiri.md/feed",
 }
 
-# ========== PER‑SOURCE TEMPLATES ==========
+#PER‑SOURCE TEMPLATES
 SOURCE_TEMPLATES = {
-    "TV8 Moldova": (
-        "📺 <b>TV8 Moldova</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Ziarul de Gardă": (
-        "📰 <b>Ziarul de Gardă</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Newsmaker MD": (
-        "📢 <b>Newsmaker MD</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Realitatea.md": (
-        "📡 <b>Realitatea.md</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "MOLDPRES": (
-        "🏛️ <b>MOLDPRES</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "MOLDPRES Sinteza": (
-        "🏛️ <b>MOLDPRES Sinteza</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Stiri.md": (
-        "📌 <b>Stiri.md</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Canal Regional TV": (
-        "📺 <b>Canal Regional TV</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Media TV": (
-        "📡 <b>Media TV</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "MOVCA": (
-        "🎭 <b>MOVCA</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "ASE MD": (
-        "📊 <b>ASE Moldova</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
-    "Biofood": (
-        "🌱 <b>Biofood</b>\n\n"
-        "{summary}\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ),
+    source: (
+        f"{get_emoji(source)} <b>{source}</b>\n"
+        "—\n"
+        "<i>{{summary}}</i>\n\n"
+        "🔗 <a href='{{link}}'>Citește articolul</a>"
+    ) for source in SOURCES
 }
-DEFAULT_TEMPLATE = "{summary}\n\n🔗 <a href='{link}'>Citește articolul</a>"
+DEFAULT_TEMPLATE = "📌 <b>Știri</b>\n—\n<i>{{summary}}</i>\n\n🔗 <a href='{{link}}'>Citește articolul</a>"
+
+def get_emoji(source: str) -> str:
+    emojis = {
+        "TV8 Moldova": "📺",
+        "Ziarul de Gardă": "📰",
+        "Newsmaker MD": "📢",
+        "Realitatea.md": "📡",
+        "MOLDPRES": "🏛️",
+        "MOLDPRES Sinteza": "🏛️",
+        "Media TV": "📡",
+        "MOVCA": "🎭",
+        "ASE MD": "📊",
+        "IPN": "📰",
+        "Agora.md": "📌",
+        "Jurnal.md": "📰",
+        "Timpul.md": "⏰",
+        "Știri.md": "🗞️",
+    }
+    return emojis.get(source, "📌")
 
 TYPE_BADGES = {
-    "breaking": "🔴 BREAKING",
+    "alert": "🚨 ALERTĂ 🚨",
+    "breaking": "⚠️ 🔴 BREAKING NEWS",
     "politics": "🏛️ POLITIC",
-    "economy": "💰 ECONOMIE",
+    "economy": "🏦 ECONOMIE",
     "crime": "⚖️ JUSTIȚIE",
-    "conflict": "⚠️ SECURITATE",
-    "fintech": "💳 FINTECH",
-    "analysis": "📊 ANALIZĂ",
+    "conflict": "🛡️ SECURITATE",
+    "fintech": "💸 FINTECH",
+    "analysis": "📊🧠 ANALIZĂ",
     "opinion": "💬 OPINIE",
     "local": "📍 LOCAL",
-    "international": "🌍 INTERNAȚIONAL",
+    "international": "🌐 INTERNAȚIONAL",
     "other": "📰 ȘTIRI",
 }
 DEFAULT_BADGE = "📰 ȘTIRI"
 
-# ---------------------------------------------------------------------------
 # 🧠 TITLE HELPERS
-# ---------------------------------------------------------------------------
 
 def normalize_title(title: str) -> str:
     title = title.lower()
@@ -135,9 +101,7 @@ def is_repost(title: str) -> bool:
     t = title.lower()
     return "sursa:" in t or "source:" in t or "preluat" in t
 
-# ---------------------------------------------------------------------------
 # 📁 HISTORY
-# ---------------------------------------------------------------------------
 
 def load_history() -> Set[str]:
     if os.path.exists(HISTORY_FILE):
@@ -157,9 +121,29 @@ def save_title_history(title: str):
     with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(normalize_title(title) + "\n")
 
-# ---------------------------------------------------------------------------
-# 🤖 AI: FILTER + SUMMARY + TYPE
-# ---------------------------------------------------------------------------
+# 🤖 AI: FILTER + SUMMARY + TYPE 
+
+def extract_json(text: str) -> Optional[dict]:
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if not match:
+        return None
+    json_str = match.group()
+    json_str = re.sub(r'"""', '"', json_str)
+    if json_str.count('{') > json_str.count('}'):
+        json_str += '}'
+    if json_str.count('"') % 2 != 0:
+        json_str += '"'
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        ro_match = re.search(r'"ro"\s*:\s*"([^"]*)"', json_str)
+        type_match = re.search(r'"type"\s*:\s*"([^"]*)"', json_str)
+        if ro_match:
+            result = {"ro": ro_match.group(1)}
+            if type_match:
+                result["type"] = type_match.group(1)
+            return result
+        return None
 
 def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[Dict[str, str]]:
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -169,7 +153,8 @@ def ask_ai_filter_and_summarize(title: str, description: str = "") -> Optional[D
         content += f"Descriere: {description}\n"
 
     prompt = f"""
-Ești editor pentru un canal de știri foarte selectiv, care publică DOAR știri cu impact major național sau internațional.
+
+    Ești editor pentru un canal de știri foarte selectiv, care publică DOAR știri cu impact major național sau internațional.
 
 {content}
 
@@ -179,6 +164,14 @@ Ești editor pentru un canal de știri foarte selectiv, care publică DOAR știr
 - Conflicte și securitate: războaie, atacuri, tensiuni grave, dezastre
 - Justiție de mare interes: anchete de corupție la nivel înalt, sentințe importante
 - Fintech/bani: reglementări financiare majore, inovații cu impact larg
+- Politică națională: decizii guvernamentale, legi, alegeri, crize politice, relații externe (inclusiv integrarea europeană, relația cu România, Ucraina, Rusia)
+- Economie și afaceri: buget, taxe, investiții, mediul de afaceri, acorduri financiare internaționale (FMI, UE), energie, agricultură, infrastructură
+- Fintech și inovații financiare: bănci, criptomonede, plăți digitale, reglementări financiare, startup-uri
+- Justiție de mare interes: anchete de corupție la nivel înalt, sentințe importante, cazuri de crimă organizată
+- Securitate și conflicte: război din Ucraina, impact asupra Moldovei, tensiuni în regiune, crize de securitate
+- Evenimente internaționale care afectează direct Moldova sau au o relevanță clară pentru cetățenii moldoveni (ex: sancțiuni, acorduri UE, evoluții în țările vecine)
+- Include știri despre vedete dacă sunt cumva relevante la viața politico, socio-economică a Republicii Moldova
+- Include opinii de la politiceni, editoriale, și comentarii din interviuri (doar dacă sunt pe un subiect important din punct de vedere socio-economic)
 
 🚫 **Respinge categoric** (indiferent de sursă):
 - Evenimente locale fără ecou național (ex: inaugurări de magazine, accidente minore, evenimente culturale locale)
@@ -187,6 +180,10 @@ Ești editor pentru un canal de știri foarte selectiv, care publică DOAR știr
 - Opinii, editoriale, interviuri fără valoare de știre
 - Știri care sunt în esență reclame sau promovări
 - Subiecte care nu afectează direct Moldova sau nu au relevanță pentru publicul moldovean
+
+🚨 **Două categorii speciale** (folosește-le după cum urmează):
+- **alert** – pentru evenimente grave: catastrofe naturale, accidente majore cu victime multiple, dezastre, stări de urgență națională, calamități (indiferent dacă se întâmplă în Moldova sau în lume, dar cu impact relevant)
+- **breaking** – pentru crize de securitate, escaladări militare grave, cazuri de corupție la cel mai înalt nivel, demisii bruște ale unor oficiali majori, evenimente care schimbă fundamental situația politică sau de securitate
 
 ❗ **Reguli stricte**:
 - Dacă știrea nu este clar în categoriile acceptate și de impact major → răspunde IGNORE
@@ -223,30 +220,21 @@ Răspunde DOAR cu un obiect JSON:
             if "ignore" in text.lower():
                 return None
 
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            json_str = match.group() if match else text
-
-            try:
-                parsed = json.loads(json_str)
-                if "ro" in parsed:
-                    return {
-                        "summary": parsed["ro"],
-                        "type": parsed.get("type", "other").lower()
-                    }
-                else:
-                    logging.error(f"AI response missing 'ro' field: {parsed}")
-                    return None
-            except json.JSONDecodeError:
-                logging.error(f"AI response not valid JSON: {text}")
+            parsed = extract_json(text)
+            if parsed and "ro" in parsed:
+                return {
+                    "summary": parsed["ro"],
+                    "type": parsed.get("type", "other").lower()
+                }
+            else:
+                logging.error(f"Could not extract valid JSON from AI response: {text}")
                 return None
 
     except Exception as e:
         logging.error(f"AI filter error: {e}")
         return None
 
-# ---------------------------------------------------------------------------
 # 🤖 AI: SAME EVENT DETECTION
-# ---------------------------------------------------------------------------
 
 def is_same_event(new_title: str, past_titles: List[str]) -> bool:
     if not past_titles:
@@ -293,9 +281,7 @@ Răspunde DOAR: YES sau NO
         logging.error(f"AI dedup error: {e}")
         return False
 
-# ---------------------------------------------------------------------------
-# 📡 RSS
-# ---------------------------------------------------------------------------
+# 📡 RSS 
 
 def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
     items = []
@@ -323,9 +309,7 @@ def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
 
     return items
 
-# ---------------------------------------------------------------------------
-# 📲 TELEGRAM
-# ---------------------------------------------------------------------------
+# 📲 TELEGRAM CONNECTION
 
 def post_to_telegram(source: str, summary_with_badge: str, link: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -351,9 +335,7 @@ def post_to_telegram(source: str, summary_with_badge: str, link: str):
     except Exception as e:
         logging.error(f"Telegram error: {e}")
 
-# ---------------------------------------------------------------------------
-# 🔄 ONE SCAN CYCLE
-# ---------------------------------------------------------------------------
+#🔄 ONE SCAN CYCLE
 
 def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
     logging.info(f"=== Cycle {cycle_num} starting ===")
@@ -399,15 +381,12 @@ def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
 
     logging.info(f"=== Cycle {cycle_num} complete ===")
 
-# ---------------------------------------------------------------------------
-# 🚀 MAIN — runs for TOTAL_RUNTIME_SECONDS, scanning every CYCLE_INTERVAL_SECONDS
-# ---------------------------------------------------------------------------
+# 🚀 MAIN CODE
 
 def run():
     run_start = time.time()
     cycle_num = 0
 
-    # Load history once at startup; both dicts are mutated in-place across cycles
     seen_links  = load_history()
     seen_titles = load_title_history()
 
@@ -422,7 +401,6 @@ def run():
 
         run_cycle(seen_links, seen_titles, cycle_num)
 
-        # How long did the cycle take?
         cycle_duration = time.time() - cycle_start
         remaining_total = TOTAL_RUNTIME_SECONDS - (time.time() - run_start)
 
@@ -430,7 +408,6 @@ def run():
             logging.info("Total runtime reached after cycle. Exiting.")
             break
 
-        # Sleep until next 30-min mark (or until end of total runtime)
         sleep_time = max(0, min(CYCLE_INTERVAL_SECONDS - cycle_duration, remaining_total))
         if sleep_time > 0:
             logging.info(
