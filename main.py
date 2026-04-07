@@ -1,380 +1,170 @@
 import urllib.request
+import urllib.parse
 import json
 import xml.etree.ElementTree as ET
 import time
 import os
 import re
 import logging
-from typing import Set, Optional, List, Tuple, Dict, Any
+from datetime import datetime, timedelta
+from typing import Set, Optional, List, Dict
 
-#CONFIGURATION
+# --- 🔐 CONFIGURATION ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
 HISTORY_FILE = "posted_links.txt"
-TITLE_HISTORY_FILE = "posted_titles.txt"
 
-REQUEST_TIMEOUT = 15
-RATE_LIMIT_SLEEP = 2
-MAX_ITEMS_PER_SOURCE = 3
+# --- ⏱️ TIMING CONFIG ---
+TOTAL_RUNTIME_SECONDS = int(5.5 * 3600) 
+MOLDOVA_OFFSET = 3  # UTC+3 for Chisinau Summer Time
 
-# --- LOOP CONFIG ---
-CYCLE_INTERVAL_SECONDS = 60 * 60      # 1 hour between cycles
-TOTAL_RUNTIME_SECONDS  = int(5.5 * 3600)  # 5 hours 30 minutes = 19800 s
+# --- 🌍 COMPREHENSIVE MOLDAVIAN KEYWORDS (Gate 1) ---
+POLITICAL_KEYWORDS = [
+    "guvern", "parlament", "președinție", "minister", "deputat", "cancelarie", 
+    "consiliu", "primărie", "vot", "lege", "proiect de lege", "hotărâre", 
+    "decret", "sesizare", "curtea constituțională", "cec", "cna", "sis",
+    "sandu", "recean", "grosu", "ceban", "spînu", "alaiba", "nosatîi", 
+    "popșoi", "vlah", "dodon", "voronin", "chicu", "usatîi", "șor", "tauber",
+    "ue", "uniunea europeană", "nato", "aderare", "integrare", "bruxelles", 
+    "kremlin", "moscova", "bucurești", "kiev", "washington", "summit", 
+    "ambasador", "diplomație", "negocieri", "război", "ucraina", "transnistria",
+    "economie", "pib", "buget", "anre", "gaz", "moldovagaz", "energocom", 
+    "tarif", "electricitate", "preț", "inflație", "bancă", "bnm", "fmi", 
+    "banca mondială", "credit", "împrumut", "investiții", "afaceri", "fintech",
+    "justiție", "procuror", "judecător", "anchetă", "dosar", "corupție", 
+    "sentință", "arest", "percheziții", "securitate", "poliție", "armată", 
+    "frontiere", "atac", "tensiuni", "protest", "manifestație"
+]
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+BLACKLIST = ["horoscop", "vremea", "sport", "fotbal", "rețetă", "showbiz", "loto"]
 
-# ========== SOURCES ==========
 SOURCES = {
     "TV8 Moldova": "https://tv8.md/feed",
     "Ziarul de Gardă": "https://www.zdg.md/feed",
     "Newsmaker MD": "https://newsmaker.md/feed",
     "Realitatea.md": "https://realitatea.md/rss",
     "MOLDPRES": "https://moldpres.md/config/rss.php?lang=rom",
-    "MOLDPRES Sinteza": "https://moldpres.md/config/rssSinteza.php?lang=rom",
-    "Media TV": "https://mediatv.md/feed",
-    "MOVCA": "https://movca.md/feed",
-    "ASE MD": "https://ase.md/feed",
-    "IPN": "https://www.ipn.md/rss",
     "Agora.md": "https://agora.md/rss",
     "Jurnal.md": "https://jurnal.md/rss",
-    "Timpul.md": "https://timpul.md/feed",
     "Știri.md": "https://stiri.md/feed",
 }
 
-def get_emoji(source: str) -> str:
-    emojis = {
-        "TV8 Moldova": "📺",
-        "Ziarul de Gardă": "📰",
-        "Newsmaker MD": "📢",
-        "Realitatea.md": "📡",
-        "MOLDPRES": "🏛️",
-        "MOLDPRES Sinteza": "🏛️",
-        "Media TV": "📡",
-        "MOVCA": "🎭",
-        "ASE MD": "📊",
-        "IPN": "📰",
-        "Agora.md": "📌",
-        "Jurnal.md": "📰",
-        "Timpul.md": "⏰",
-        "Știri.md": "🗞️",
-    }
-    return emojis.get(source, "📌")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# PER-SOURCE TEMPLATES — use single braces for .format()
-SOURCE_TEMPLATES = {
-    source: (
-        f"{get_emoji(source)} <b>{source}</b>\n"
-        "—\n"
-        "<i>{summary}</i>\n\n"
-        "🔗 <a href='{link}'>Citește articolul</a>"
-    ) for source in SOURCES
-}
-DEFAULT_TEMPLATE = "📌 <b>Știri</b>\n—\n<i>{summary}</i>\n\n🔗 <a href='{link}'>Citește articolul</a>"
-
-TYPE_BADGES = {
-    "alert": "🚨 ALERTĂ 🚨",
-    "breaking": "⚠️ 🔴 BREAKING NEWS",
-    "politics": "🏛️ POLITIC",
-    "economy": "🏦 ECONOMIE",
-    "crime": "⚖️ JUSTIȚIE",
-    "conflict": "🛡️ SECURITATE",
-    "fintech": "💸 FINTECH",
-    "analysis": "📊🧠 ANALIZĂ",
-    "opinion": "💬 OPINIE",
-    "local": "📍 LOCAL",
-    "international": "🌐 INTERNAȚIONAL",
-    "other": "📰 ȘTIRI",
-}
-DEFAULT_BADGE = "📰 ȘTIRI"
-
-# 🧠 TITLE HELPERS
-
-def normalize_title(title: str) -> str:
-    title = title.lower()
-    title = re.sub(r'sursa[:\-].*', '', title)
-    title = re.sub(r'[^\w\s]', '', title)
-    return re.sub(r'\s+', ' ', title).strip()
-
-def is_repost(title: str) -> bool:
+# --- 🛠️ GATE 1: LOCAL KEYWORD FILTER ---
+def is_worth_checking_with_ai(title: str) -> bool:
     t = title.lower()
-    return "sursa:" in t or "source:" in t or "preluat" in t
+    if any(word in t for word in BLACKLIST): return False
+    return any(word in t for word in POLITICAL_KEYWORDS)
 
-# 📁 HISTORY
-
-def load_history() -> Set[str]:
-    if os.path.exists(HISTORY_FILE):
-        return set(open(HISTORY_FILE).read().splitlines())
-    return set()
-
-def save_to_history(link: str):
-    with open(HISTORY_FILE, "a") as f:
-        f.write(link + "\n")
-
-def load_title_history() -> List[str]:
-    if os.path.exists(TITLE_HISTORY_FILE):
-        return open(TITLE_HISTORY_FILE, encoding="utf-8").read().splitlines()
-    return []
-
-def save_title_history(title: str):
-    with open(TITLE_HISTORY_FILE, "a", encoding="utf-8") as f:
-        f.write(normalize_title(title) + "\n")
-
-# 🤖 AI: FILTER + SUMMARY + TYPE + DEDUP IN ONE CALL
-
-def extract_json(text: str) -> Optional[dict]:
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if not match:
-        return None
-    json_str = match.group()
-    json_str = re.sub(r'"""', '"', json_str)
-    if json_str.count('{') > json_str.count('}'):
-        json_str += '}'
-    if json_str.count('"') % 2 != 0:
-        json_str += '"'
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
-        ro_match = re.search(r'"ro"\s*:\s*"([^"]*)"', json_str)
-        type_match = re.search(r'"type"\s*:\s*"([^"]*)"', json_str)
-        if ro_match:
-            result = {"ro": ro_match.group(1)}
-            if type_match:
-                result["type"] = type_match.group(1)
-            return result
-        return None
-
-def ask_ai_filter_summarize_dedup(title: str, description: str, past_titles: List[str]) -> Optional[Dict[str, str]]:
-    """Single AI call: filter relevance, check dedup, and summarize."""
+# --- 🧠 GATE 2: AI EDITORIAL FILTER ---
+def ask_ai_analysis(title: str, description: str) -> Optional[Dict[str, str]]:
     url = "https://openrouter.ai/api/v1/chat/completions"
-
-    content = f"Titlu: {title}\n"
-    if description:
-        content += f"Descriere: {description}\n"
-
-    recent = past_titles[-30:]
-    past_block = "\n".join(recent) if recent else "(niciuna)"
-
-    prompt = f"""Ești editor pentru un canal de știri foarte selectiv despre Republica Moldova.
-
-{content}
-
-Știri deja publicate (ultimele {len(recent)}):
-{past_block}
-
-📌 **Categorii acceptate** (doar dacă au impact semnificativ):
-- Politică majoră: decizii guvernamentale, legi importante, alegeri, crize politice, relații externe
-- Economie majoră: buget, taxe, crize economice, acorduri financiare internaționale
-- Conflicte și securitate: războaie, atacuri, tensiuni grave, dezastre
-- Justiție de mare interes: anchete de corupție la nivel înalt, sentințe importante
-- Fintech/bani: reglementări financiare majore, inovații cu impact larg
-- Politică națională: decizii guvernamentale, legi, alegeri, crize politice, relații externe (inclusiv integrarea europeană, relația cu România, Ucraina, Rusia)
-- Economie și afaceri: buget, taxe, investiții, mediul de afaceri, acorduri financiare internaționale (FMI, UE), energie, agricultură, infrastructură
-- Fintech și inovații financiare: bănci, criptomonede, plăți digitale, reglementări financiare, startup-uri
-- Justiție de mare interes: anchete de corupție la nivel înalt, sentințe importante, cazuri de crimă organizată
-- Securitate și conflicte: război din Ucraina, impact asupra Moldovei, tensiuni în regiune, crize de securitate
-- Evenimente internaționale care afectează direct Moldova sau au relevanță clară pentru cetățenii moldoveni
-- Include știri despre vedete dacă sunt relevante la viața politico, socio-economică a Republicii Moldova
-- Include opinii de la politiceni, editoriale, și comentarii din interviuri (doar dacă sunt pe un subiect important din punct de vedere socio-economic)
-
-🚫 **Respinge categoric**:
-- Evenimente locale fără ecou național (ex: inaugurări de magazine, accidente minore, evenimente culturale locale)
-- Știri din sport, divertisment, lifestyle, vreme, animale, oameni, vedete (dacă nu sunt relevante politic/economic)
-- Anunțuri de rutină (ex: întreruperi apă/curent, concursuri, burse)
-- Știri care sunt în esență reclame sau promovări
-- Subiecte care nu afectează direct Moldova
-
-🚨 **Categorii speciale**:
-- **alert** – catastrofe naturale, accidente majore cu victime multiple, stări de urgență națională
-- **breaking** – crize de securitate, escaladări militare, corupție la cel mai înalt nivel, demisii bruște ale unor oficiali majori
-
-❗ **Reguli stricte**:
-- Dacă știrea nu este clar în categoriile acceptate → răspunde cu {{"ignore": true}}
-- Dacă știrea acoperă același eveniment ca una din cele deja publicate → răspunde cu {{"ignore": true}}
-- Nu inventa detalii. Folosește strict informațiile din titlu și descriere.
-- Rezumatul: o singură propoziție, în română, clară și concisă.
-- Tipuri valide: breaking, alert, politics, economy, crime, conflict, fintech, analysis, opinion, local, international, other
-
-Răspunde DOAR cu JSON:
-{{"ro": "rezumat", "type": "tip"}}
-sau
-{{"ignore": true}}
-"""
+    
+    # Stricter prompt to ensure only CRUCIAL news is posted
+    prompt = f"""
+    Ești editorul principal pentru canalul 'Republica News' din Moldova. 
+    Misiunea ta: Postează DOAR știri politice sau economice cu impact NAȚIONAL major.
+    
+    Știre: {title}
+    Descriere: {description[:150]}
+    
+    CRITERII DE FILTRARE:
+    - Ignoră evenimente de rutină, vizite de curtoazie sau declarații fără substanță.
+    - Acceptă doar schimbări de legi, crize, decizii economice mari sau securitate națională.
+    - Dacă nu este crucial, răspunde exact cu: "IGNORE"
+    
+    Dacă este crucial, răspunde DOAR cu JSON:
+    {{"ro": "rezumat scurt și profesional de o singură propoziție", "type": "politics/economy/conflict/other"}}
+    """
 
     payload = {
-        "model": "openrouter/auto",
+        "model": "google/gemini-2.0-flash-001", 
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
+        "temperature": 0.1,
         "max_tokens": 120
     }
 
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+            headers={"Authorization": f"Bearer {OPEN_ROUTER_API_KEY}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=12) as res:
             data = json.loads(res.read())
             text = data["choices"][0]["message"]["content"].strip()
-
-            if "ignore" in text.lower():
-                return None
-
-            parsed = extract_json(text)
-            if parsed:
-                if parsed.get("ignore"):
-                    return None
-                if "ro" in parsed:
-                    return {
-                        "summary": parsed["ro"],
-                        "type": parsed.get("type", "other").lower()
-                    }
-
-            logging.error(f"Could not extract valid JSON from AI response: {text}")
-            return None
-
-    except Exception as e:
-        logging.error(f"AI filter error: {e}")
+            if "IGNORE" in text.upper(): return None
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            return json.loads(match.group()) if match else None
+    except:
         return None
 
-# 📡 RSS
-
-def fetch_rss_items(feed_url: str) -> List[Tuple[str, str, str]]:
-    items = []
-    try:
-        req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-            root = ET.fromstring(response.read())
-
-            for item in root.findall('.//item')[:MAX_ITEMS_PER_SOURCE]:
-                title_elem = item.find('title')
-                link_elem = item.find('link')
-                desc_elem = item.find('description')
-
-                if title_elem is None or link_elem is None:
-                    continue
-
-                title = title_elem.text.strip() if title_elem.text else ""
-                link = link_elem.text.strip() if link_elem.text else ""
-                description = desc_elem.text.strip() if desc_elem is not None and desc_elem.text else ""
-
-                if title and link:
-                    items.append((link, title, description))
-    except Exception as e:
-        logging.error(f"RSS error for {feed_url}: {e}")
-
-    return items
-
-# 📲 TELEGRAM
-
-def post_to_telegram(source: str, summary_with_badge: str, link: str):
+def post_to_telegram(source, summary, n_type, link):
+    badges = {"politics": "🏛️ POLITIC", "economy": "🏦 ECONOMIE", "conflict": "🛡️ SECURITATE", "breaking": "⚠️ BREAKING"}
+    badge = badges.get(n_type, "📰 ȘTIRI")
+    
+    # Updated Header to Republica News
+    message = f"🌟 <b>Republica News</b>\n{badge} | {source}\n—\n<i>{summary}</i>\n\n🔗 <a href='{link}'>Citește articolul complet</a>"
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-
-    template = SOURCE_TEMPLATES.get(source, DEFAULT_TEMPLATE)
-    message = template.format(summary=summary_with_badge, link=link)
-
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"}
-        )
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req)
-        logging.info(f"Posted successfully from {source}")
-
     except Exception as e:
-        logging.error(f"Telegram error: {e}")
+        logging.error(f"Telegram Error: {e}")
 
-# 🔄 ONE SCAN CYCLE
+def run_cycle(cycle_num):
+    seen_links = set(open(HISTORY_FILE).read().splitlines()) if os.path.exists(HISTORY_FILE) else set()
+    logging.info(f"--- Republica News: Ciclul {cycle_num} ---")
 
-def run_cycle(seen_links: Set[str], seen_titles: List[str], cycle_num: int):
-    logging.info(f"=== Cycle {cycle_num} starting ===")
+    for source, rss_url in SOURCES.items():
+        try:
+            req = urllib.request.Request(rss_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                root = ET.fromstring(response.read())
+                for item in root.findall('.//item')[:2]:
+                    link = item.find('link').text.strip()
+                    title = item.find('title').text.strip()
+                    desc = item.find('description').text.strip() if item.find('description') is not None else ""
 
-    for source, feed in SOURCES.items():
-        items = fetch_rss_items(feed)
-        if not items:
-            logging.info(f"No items from {source}, skipping.")
-            continue
+                    if link in seen_links: continue
+                    if not is_worth_checking_with_ai(title): continue
 
-        for link, title, description in items:
+                    result = ask_ai_analysis(title, desc)
+                    if result and "ro" in result:
+                        post_to_telegram(source, result["ro"], result["type"], link)
+                        with open(HISTORY_FILE, "a") as f: f.write(link + "\n")
+                        seen_links.add(link)
+                        logging.info(f"Postat: {title[:30]}...")
+                    
+                    time.sleep(2) 
+        except Exception as e:
+            logging.error(f"Eroare sursă {source}: {e}")
 
-            if is_repost(title):
-                continue
-
-            if link in seen_links:
-                continue
-
-            # Single AI call handles filtering, dedup, and summarization
-            result = ask_ai_filter_summarize_dedup(title, description, seen_titles)
-            if not result:
-                continue
-
-            summary = result["summary"]
-            news_type = result["type"]
-
-            badge = TYPE_BADGES.get(news_type, DEFAULT_BADGE)
-            summary_with_badge = f"{badge}\n{summary}"
-
-            post_to_telegram(source, summary_with_badge, link)
-
-            save_to_history(link)
-            save_title_history(title)
-
-            seen_links.add(link)
-            seen_titles.append(normalize_title(title))
-
-            time.sleep(RATE_LIMIT_SLEEP)
-
-        time.sleep(RATE_LIMIT_SLEEP)
-
-    logging.info(f"=== Cycle {cycle_num} complete ===")
-
-# 🚀 MAIN
-
-def run():
+if __name__ == "__main__":
     run_start = time.time()
     cycle_num = 0
-
-    seen_links  = load_history()
-    seen_titles = load_title_history()
 
     while True:
         elapsed = time.time() - run_start
         if elapsed >= TOTAL_RUNTIME_SECONDS:
-            logging.info("Total runtime reached. Exiting.")
+            logging.info("Timpul limită atins (5.5h). Închidere.")
             break
 
         cycle_num += 1
         cycle_start = time.time()
+        run_cycle(cycle_num)
 
-        run_cycle(seen_links, seen_titles, cycle_num)
+        chisinau_now = datetime.utcnow() + timedelta(hours=MOLDOVA_OFFSET)
+        current_hour = chisinau_now.hour
+        
+        # Day (07-23): 30 min | Night: 60 min
+        interval = (30 * 60) if (7 <= current_hour < 23) else (60 * 60)
 
         cycle_duration = time.time() - cycle_start
         remaining_total = TOTAL_RUNTIME_SECONDS - (time.time() - run_start)
 
-        if remaining_total <= 0:
-            logging.info("Total runtime reached after cycle. Exiting.")
-            break
-
-        sleep_time = max(0, min(CYCLE_INTERVAL_SECONDS - cycle_duration, remaining_total))
-        if sleep_time > 0:
-            logging.info(
-                f"Next cycle in {sleep_time/60:.1f} min "
-                f"({remaining_total/60:.0f} min remaining in run)."
-            )
-            time.sleep(sleep_time)
-
-if __name__ == "__main__":
-    run()
+        if remaining_total <= 0: break
+        sleep_time = max(0, min(interval - cycle_duration, remaining_total))
+        logging.info(f"Ora Chișinău: {current_hour}. Următorul scan în {sleep_time/60:.1f} min.")
+        time.sleep(sleep_time)
