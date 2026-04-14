@@ -45,10 +45,7 @@ SOURCES = {
     "Ziarul de Gardă":"https://www.zdg.md/feed",
     "Newsmaker MD":   "https://newsmaker.md/feed",
     "Realitatea.md":  "https://realitatea.md/rss",
-    "MOLDPRES":       "https://moldpres.md/config/rss.php?lang=rom",
-    "Agora.md":       "https://agora.md/rss",
-    "Jurnal.md":      "https://jurnal.md/rss",
-    "Știri.md":       "https://stiri.md/feed",
+   
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
