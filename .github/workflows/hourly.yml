@@ -13,10 +13,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Restore history cache
         id: cache-history
         uses: actions/cache@v4
@@ -27,12 +29,14 @@ jobs:
           key: posted-history-stable
           restore-keys: |
             posted-history-
+
       - name: Run the script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
+
       - name: Save history cache
         if: always()
         uses: actions/cache@v4
