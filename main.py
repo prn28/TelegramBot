@@ -264,11 +264,11 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
     }
     badge = badges.get(n_type, "📰 ȘTIRI")
     message = (
-        f"🌟 <b>Republica News</b>\n"
+        #f"🌟 <b>Republica News</b>\n" 
         f"{badge} | {source}\n"
-        f"—\n"
+        f"\n"
         f"<i>{summary}</i>\n\n"
-        f"🔗 <a href='{link}'>Citește articolul complet</a>"
+        f"🔗 <a href='{link}'>Citește articolul complet:</a>"
     )
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
