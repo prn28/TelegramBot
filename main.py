@@ -264,8 +264,7 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
     }
     badge = badges.get(n_type, "📰 ȘTIRI")
     message = (
-        f"🌟 <b>Republica News</b>"
-        f"{badge} | {source}\n"
+        f"🌟 <b>Republica News</b>" | f"{badge} 
         f"\n"
         f"<i>{summary}</i>\n\n"
         f"🔗 <a href='{link}'>Citește articolul complet: </a>"
