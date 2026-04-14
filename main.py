@@ -180,10 +180,15 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
 
         "Când ești în dubiu — PUBLICĂ. Este mai bine să informezi decât să omiti.\n\n"
 
+        "STILUL câmpului 'ro': Scrie ca un jurnalist — o propoziție directă, la subiect, la timpul prezent sau trecut.\n"
+        "INTERZIS să începi cu: 'Articol despre', 'Știre despre', 'Un articol', 'Raport despre'.\n"
+        "CORECT: 'Aliații NATO resping blocada portului impusă de Trump.'\n"
+        "CORECT: 'Ungaria continuă importurile de gaze rusești, afectând securitatea energetică regională.'\n\n"
+
         f"{numbered_list}\n\n"
 
         "Răspunde EXCLUSIV cu JSON valid, fără markdown, fără backtick-uri, fără alt text:\n"
-        '{"results": [{"index": 1, "publish": true, "ro": "rezumat concis o propoziție în română", "type": "politics"}, '
+        '{"results": [{"index": 1, "publish": true, "ro": "Guvernul a aprobat bugetul pentru 2025 cu un deficit de 5%.", "type": "politics"}, '
         '{"index": 2, "publish": false}]}\n'
         "Tipuri valide: politics, economy, conflict, other."
     )
