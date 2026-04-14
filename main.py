@@ -49,7 +49,7 @@ SOURCES = {
     "TV8 Moldova":    "https://tv8.md/feed",
     "Ziarul de Gardă":"https://www.zdg.md/feed",
     "Newsmaker MD":   "https://newsmaker.md/feed",
-    "Realitatea.md":  "https://realitatea.md/rss",
+    "Realitatea":  "https://realitatea.md/rss",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -264,8 +264,7 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
     }
     badge = badges.get(n_type, "📰 ȘTIRI")
     message = (
-        f"🌟 <b>Republica News</b> 🌟\n"
-        f"\n"
+        f"🌟 <b>Republica News</b>"
         f"{badge} | {source}\n"
         f"\n"
         f"<i>{summary}</i>\n\n"
