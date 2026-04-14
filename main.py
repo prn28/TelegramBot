@@ -37,6 +37,10 @@ POLITICAL_KEYWORDS = [
     "tarif", "electricitate", "inflație", "bnm", "fmi", "banca mondială",
     "justiție", "procuror", "judecător", "corupție", "arest", "percheziții",
     "protest", "manifestație", "atac", "tensiuni",
+    # Regional/international triggers relevant to Moldova
+    "trump", "putin", "zelenski", "ursula", "ungaria", "orban",
+    "petrol", "energie", "gaze", "blocadă", "sancțiuni", "embargo",
+    "refugiați", "frontieră", "migrație",
 ]
 
 BLACKLIST = ["horoscop", "vremea", "sport", "fotbal", "rețetă", "showbiz", "loto"]
@@ -52,7 +56,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 
 # ---------------------------------------------------------------------------
-# STARTUP CHECKS — catch misconfig immediately
+# STARTUP CHECKS
 # ---------------------------------------------------------------------------
 
 def check_env():
@@ -66,7 +70,6 @@ def check_env():
         raise SystemExit(1)
     logging.info("✅ Variabile de mediu OK")
 
-    # Quick ping to OpenRouter to verify key is valid
     try:
         req = urllib.request.Request(
             "https://openrouter.ai/api/v1/models",
@@ -161,16 +164,26 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
     numbered_list = "\n\n".join(lines)
 
     prompt = (
-        "Ești editorul principal al canalului 'Republica News' din Moldova.\n"
-        "Analizează lista de știri de mai jos și decide care merită publicate.\n\n"
-        "CRITERII:\n"
-        "- Publică DOAR știri politice sau economice cu impact NAȚIONAL major.\n"
-        "- Ignoră: rutine administrative, vizite de curtoazie, declarații fără substanță.\n"
-        "- Acceptă: schimbări de legi, crize, decizii economice mari, securitate națională.\n\n"
+        "Ești editorul principal al canalului 'Republica News' — un canal de știri pentru cetățenii Republicii Moldova.\n\n"
+
+        "PUBLICĂ dacă știrea se încadrează în oricare din aceste categorii:\n"
+        "  A) Politică internă moldovenească — decizii de guvern, parlament, legi, alegeri, corupție, justiție\n"
+        "  B) Economie care afectează Moldova — prețuri energie, gaz, electricitate, buget, FMI, BNM, inflație\n"
+        "  C) Securitate și geopolitică regională — Ucraina, Transnistria, NATO, Rusia, tensiuni militare\n"
+        "  D) Evenimente internaționale cu impact direct asupra Moldovei — sancțiuni, embargouri, relații UE,\n"
+        "     decizii ale partenerilor strategici (SUA, Germania, România, Ungaria privind gaze/petrol, etc.)\n\n"
+
+        "IGNORĂ doar dacă știrea nu are NICIUN impact rezonabil asupra Moldovei:\n"
+        "  - Știri despre alte țări fără legătură cu Moldova sau regiunea\n"
+        "  - Evenimente de rutină: inaugurări, vizite simbolice, declarații fără substanță\n"
+        "  - Divertisment, sport, horoscop, meteo\n\n"
+
+        "Când ești în dubiu — PUBLICĂ. Este mai bine să informezi decât să omiti.\n\n"
+
         f"{numbered_list}\n\n"
-        "Răspunde EXCLUSIV cu un obiect JSON valid, fără markdown, fără backtick-uri, fără text înainte sau după.\n"
-        "Exemplu pentru 2 știri: "
-        '{"results": [{"index": 1, "publish": true, "ro": "rezumat", "type": "politics"}, '
+
+        "Răspunde EXCLUSIV cu JSON valid, fără markdown, fără backtick-uri, fără alt text:\n"
+        '{"results": [{"index": 1, "publish": true, "ro": "rezumat concis o propoziție în română", "type": "politics"}, '
         '{"index": 2, "publish": false}]}\n'
         "Tipuri valide: politics, economy, conflict, other."
     )
@@ -178,7 +191,7 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
     payload = {
         "model": "google/gemini-2.0-flash-001",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
+        "temperature": 0.2,
         "max_tokens": 600,
     }
 
@@ -200,7 +213,6 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
         logging.info(f"  [AI] HTTP status: {http_status}")
         data = json.loads(response_body)
 
-        # Check for API-level error returned in the body (e.g. invalid key, quota)
         if "error" in data:
             logging.error(f"  [AI] API error în body: {data['error']}")
             return [None] * len(candidates)
@@ -208,9 +220,7 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
         raw_text = data["choices"][0]["message"]["content"].strip()
         logging.info(f"  [AI raw]: {raw_text[:800]}")
 
-        # Strip markdown fences if present
         clean_text = re.sub(r"```(?:json)?", "", raw_text).strip().rstrip("`").strip()
-
         parsed = json.loads(clean_text)
         result_map = {r["index"]: r for r in parsed.get("results", [])}
 
