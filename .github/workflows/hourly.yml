@@ -1,15 +1,18 @@
 name: Hourly Moldova News
+
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 310        # FIX: 4.5h script + 10min buffer = ~280min; 310 is safe
     concurrency:
       group: moldova-news
       cancel-in-progress: false
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,6 +22,8 @@ jobs:
         with:
           python-version: '3.10'
 
+      # FIX #3: Use run_id as cache key so history is always saved.
+      # restore-keys fallback picks up the latest previous run's cache.
       - name: Restore history cache
         id: cache-history
         uses: actions/cache@v4
@@ -26,7 +31,7 @@ jobs:
           path: |
             posted_links.txt
             posted_titles.txt
-          key: posted-history-stable
+          key: posted-history-${{ github.run_id }}
           restore-keys: |
             posted-history-
 
@@ -44,4 +49,12 @@ jobs:
           path: |
             posted_links.txt
             posted_titles.txt
-          key: posted-history-stable
+          key: posted-history-${{ github.run_id }}
+
+      # FIX #10: Alert via Telegram if the workflow fails
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=⚠️ Republica News: workflow EȘUAT pe GitHub Actions (run #${{ github.run_id }})"
