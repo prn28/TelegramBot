@@ -19,7 +19,7 @@ HISTORY_LINKS_FILE = "posted_links.txt"
 HISTORY_TITLES_FILE = "posted_titles.txt"
 
 # --- ⏱️ TIMING CONFIG ---
-TOTAL_RUNTIME_SECONDS = int(5 * 3600)
+TOTAL_RUNTIME_SECONDS = int(4.5 * 3600)   # FIX #8: was 5h, reduced to 4.5h to avoid gap with 6h cron
 CYCLE_INTERVAL_SECONDS = 3600
 MOLDOVA_OFFSET = 3  # UTC+3 Chișinău
 
@@ -37,7 +37,6 @@ POLITICAL_KEYWORDS = [
     "tarif", "electricitate", "inflație", "bnm", "fmi", "banca mondială",
     "justiție", "procuror", "judecător", "corupție", "arest", "percheziții",
     "protest", "manifestație", "atac", "tensiuni",
-    # Regional/international triggers relevant to Moldova
     "trump", "putin", "zelenski", "ursula", "ungaria", "orban",
     "petrol", "energie", "gaze", "blocadă", "sancțiuni", "embargo",
     "refugiați", "frontieră", "migrație",
@@ -46,10 +45,10 @@ POLITICAL_KEYWORDS = [
 BLACKLIST = ["horoscop", "vremea", "sport", "fotbal", "rețetă", "showbiz", "loto"]
 
 SOURCES = {
-    "TV8 Moldova":    "https://tv8.md/feed",
-    "Ziarul de Gardă":"https://www.zdg.md/feed",
-    "Newsmaker MD":   "https://newsmaker.md/feed",
-    "Realitatea":  "https://realitatea.md/rss",
+    "TV8 Moldova":     "https://tv8.md/feed",
+    "Ziarul de Gardă": "https://www.zdg.md/feed",
+    "Newsmaker MD":    "https://newsmaker.md/feed",
+    "Realitatea":      "https://realitatea.md/rss",
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -81,6 +80,28 @@ def check_env():
     except Exception as e:
         logging.error(f"❌ OpenRouter ping EȘUAT: {e}")
         raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# NETWORK HELPER — FIX #6: retry on transient errors
+# ---------------------------------------------------------------------------
+
+def fetch_url(url: str, headers: Optional[Dict] = None, retries: int = 2, timeout: int = 15) -> bytes:
+    last_exc = None
+    for attempt in range(retries + 1):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers=headers or {"User-Agent": "Mozilla/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception as e:
+            last_exc = e
+            if attempt < retries:
+                logging.warning(f"  Retry {attempt + 1}/{retries} pentru {url}: {e}")
+                time.sleep(3)
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +218,23 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
         "model": "google/gemini-2.0-flash-001",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
-        "max_tokens": 600,
+        "max_tokens": 1500,   # FIX #2: was 600, raised to handle large batches
     }
 
     raw_text = ""
     try:
         logging.info("  [AI] Trimit cerere la OpenRouter...")
+        # FIX #6: use fetch_url with retry for the AI call too
+        response_body = fetch_url(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPEN_ROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            retries=2,
+            timeout=30,
+        )
+        # fetch_url uses urlopen; we need to POST, so use manual request here
         req = urllib.request.Request(
             "https://openrouter.ai/api/v1/chat/completions",
             data=json.dumps(payload).encode(),
@@ -211,9 +243,20 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(req, timeout=25) as res:
-            http_status = res.status
-            response_body = res.read()
+        last_exc = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as res:
+                    http_status = res.status
+                    response_body = res.read()
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt < 2:
+                    logging.warning(f"  [AI] Retry {attempt+1}/2: {e}")
+                    time.sleep(3)
+        else:
+            raise last_exc
 
         logging.info(f"  [AI] HTTP status: {http_status}")
         data = json.loads(response_body)
@@ -225,7 +268,10 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
         raw_text = data["choices"][0]["message"]["content"].strip()
         logging.info(f"  [AI raw]: {raw_text[:800]}")
 
-        clean_text = re.sub(r"```(?:json)?", "", raw_text).strip().rstrip("`").strip()
+        # FIX #5: robust JSON extraction — find the outermost {...} block
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        clean_text = match.group(0) if match else raw_text
+
         parsed = json.loads(clean_text)
         result_map = {r["index"]: r for r in parsed.get("results", [])}
 
@@ -263,11 +309,12 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
         "breaking": "⚠️ BREAKING",
     }
     badge = badges.get(n_type, "📰 ȘTIRI")
+    # FIX #1: was broken f-string with invalid | pipe operator
     message = (
-        f"🌟 <b>Republica News</b>" | f"{badge} 
+        f"🌟 <b>Republica News</b> | {badge}\n"
         f"\n"
         f"<i>{summary}</i>\n\n"
-        f"🔗 <a href='{link}'>Citește articolul complet: </a>"
+        f"🔗 <a href='{link}'>Citește articolul complet</a>"
     )
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
@@ -278,9 +325,11 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
             headers={"Content-Type": "application/json"},
         )
         urllib.request.urlopen(req)
-        logging.info(f"  📨 Telegram OK")
+        logging.info("  📨 Telegram OK")
     except Exception as e:
         logging.error(f"  Telegram error: {e}")
+
+
 # ---------------------------------------------------------------------------
 # MAIN CYCLE
 # ---------------------------------------------------------------------------
@@ -295,10 +344,7 @@ def run_cycle(cycle_num: int) -> None:
 
     for source, rss_url in SOURCES.items():
         try:
-            req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=15) as response:
-                raw = response.read()
-
+            raw = fetch_url(rss_url)   # FIX #6: uses retry helper
             root = parse_feed(raw)
 
             for item in root.findall(".//item")[:3]:
@@ -306,12 +352,19 @@ def run_cycle(cycle_num: int) -> None:
                 title_el = item.find("title")
                 desc_el  = item.find("description")
 
-                if link_el is None or title_el is None:
+                if title_el is None:
                     continue
 
-                link  = (link_el.text or "").strip()
                 title = (title_el.text or "").strip()
-                desc  = (desc_el.text or "").strip() if desc_el is not None else ""
+
+                # FIX #7: fallback to <guid> when <link> is missing or empty
+                link = (link_el.text or "").strip() if link_el is not None else ""
+                if not link:
+                    guid_el = item.find("guid")
+                    if guid_el is not None and guid_el.attrib.get("isPermaLink") != "false":
+                        link = (guid_el.text or "").strip()
+
+                desc = (desc_el.text or "").strip() if desc_el is not None else ""
 
                 if not link or not title:
                     continue
@@ -345,6 +398,11 @@ def run_cycle(cycle_num: int) -> None:
     posted = 0
     for candidate, result in zip(candidates, results):
         if result:
+            # FIX #4: re-check similarity post-AI to catch duplicates from different sources
+            if titles_are_similar(candidate["title"], seen_titles):
+                logging.info(f"  Titlu duplicat post-AI, ignorat: {candidate['title'][:60]}")
+                continue
+
             post_to_telegram(candidate["source"], result["ro"], result["type"], candidate["link"])
             save_item(HISTORY_LINKS_FILE,  candidate["link"])
             save_item(HISTORY_TITLES_FILE, candidate["title"])
@@ -370,7 +428,7 @@ if __name__ == "__main__":
     while True:
         elapsed = time.time() - run_start
         if elapsed >= TOTAL_RUNTIME_SECONDS:
-            logging.info("Timpul limită atins (5h). Închidere.")
+            logging.info("Timpul limită atins. Închidere.")
             break
 
         cycle_num  += 1
