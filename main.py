@@ -19,9 +19,8 @@ HISTORY_LINKS_FILE = "posted_links.txt"
 HISTORY_TITLES_FILE = "posted_titles.txt"
 
 # --- ⏱️ TIMING CONFIG ---
-TOTAL_RUNTIME_SECONDS = int(5 * 3600)
-CYCLE_INTERVAL_SECONDS = 3600
-MOLDOVA_OFFSET = 3  # UTC+3 Chișinău
+CYCLE_INTERVAL_SECONDS = 1800   # 30 minutes
+MOLDOVA_OFFSET = 3              # UTC+3 Chișinău
 
 # --- 🌍 KEYWORD FILTER (Gate 1) ---
 POLITICAL_KEYWORDS = [
@@ -37,7 +36,6 @@ POLITICAL_KEYWORDS = [
     "tarif", "electricitate", "inflație", "bnm", "fmi", "banca mondială",
     "justiție", "procuror", "judecător", "corupție", "arest", "percheziții",
     "protest", "manifestație", "atac", "tensiuni",
-    # Regional/international triggers relevant to Moldova
     "trump", "putin", "zelenski", "ursula", "ungaria", "orban",
     "petrol", "energie", "gaze", "blocadă", "sancțiuni", "embargo",
     "refugiați", "frontieră", "migrație",
@@ -151,7 +149,7 @@ def is_worth_ai_check(title: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# GATE 2 – AI BATCH FILTER
+# GATE 2 – AI BATCH FILTER (BROADER PROMPT)
 # ---------------------------------------------------------------------------
 
 def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
@@ -170,13 +168,15 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
         "  A) Politică internă moldovenească — decizii de guvern, parlament, legi, alegeri, corupție, justiție\n"
         "  B) Economie care afectează Moldova — prețuri energie, gaz, electricitate, buget, FMI, BNM, inflație\n"
         "  C) Securitate și geopolitică regională — Ucraina, Transnistria, NATO, Rusia, tensiuni militare\n"
-        "  D) Evenimente internaționale cu impact direct asupra Moldovei — sancțiuni, embargouri, relații UE,\n"
-        "     decizii ale partenerilor strategici (SUA, Germania, România, Ungaria privind gaze/petrol, etc.)\n\n"
+        "  D) Evenimente internaționale care ar putea avea vreun efect asupra Moldovei (direct sau indirect) —\n"
+        "     sancțiuni, embargouri, relații UE, decizii ale SUA, Germaniei, României, Ungariei privind energie,\n"
+        "     comerț, ajutor financiar, schimbări de politică externă.\n"
+        "  E) Orice știre cu un titlu sugestiv sau care pare importantă pentru publicul larg — fii generos.\n\n"
 
-        "IGNORĂ doar dacă știrea nu are NICIUN impact rezonabil asupra Moldovei:\n"
-        "  - Știri despre alte țări fără legătură cu Moldova sau regiunea\n"
-        "  - Evenimente de rutină: inaugurări, vizite simbolice, declarații fără substanță\n"
-        "  - Divertisment, sport, horoscop, meteo\n\n"
+        "IGNORĂ DOAR dacă știrea este complet irelevantă pentru Moldova:\n"
+        "  - Știri despre alte țări fără absolut nicio legătură (de exemplu, politică locală din Peru)\n"
+        "  - Evenimente de rutină fără impact: inaugurări de parcuri, festivaluri locale neimportante\n"
+        "  - Divertisment, sport, horoscop, meteo, bârfe despre vedete\n\n"
 
         "Când ești în dubiu — PUBLICĂ. Este mai bine să informezi decât să omiti.\n\n"
 
@@ -252,7 +252,7 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
 
 
 # ---------------------------------------------------------------------------
-# TELEGRAM
+# TELEGRAM – PRETTY MESSAGE WITH UNIVERSAL SEPARATOR
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
@@ -263,21 +263,26 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
         "breaking": "⚠️ BREAKING",
     }
     badge = badges.get(n_type, "📰 ȘTIRI")
+    
+    # Optional small caps for source
+    def small_caps(txt: str) -> str:
+        mapping = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ")
+        return txt.upper().translate(mapping)
+    
+    source_fancy = small_caps(source)
+    
     message = (
         f"🌟 <b>Republica News</b>\n"
-        f"{badge} | {source}\n"
-        f"—\n"
-        f"<i>{summary}</i>\n\n"
-        f"🔗 <a href='{link}'>Citește articolul complet</a>"
+        f"✦ {badge}  ✦ {source_fancy}\n\n"
+        f"   <i>„{summary}”</i>\n\n"
+        f"   🔗 <a href='{link}'>⟳ Citește articolul</a>"
     )
+    # send with parse_mode="HTML"
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-        )
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req)
         logging.info(f"  📨 Telegram OK")
     except Exception as e:
@@ -285,7 +290,7 @@ def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# MAIN CYCLE
+# MAIN CYCLE (30 min, between 05:00–23:00 Moldova time)
 # ---------------------------------------------------------------------------
 
 def run_cycle(cycle_num: int) -> None:
@@ -361,35 +366,51 @@ def run_cycle(cycle_num: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ENTRY POINT
+# SCHEDULER: Only runs between 05:00 and 23:00 Moldova time, every 30 min
 # ---------------------------------------------------------------------------
+
+def is_running_time() -> bool:
+    """Return True if current Moldova time is between 05:00 and 23:00 inclusive."""
+    now = datetime.utcnow() + timedelta(hours=MOLDOVA_OFFSET)
+    hour = now.hour
+    return 5 <= hour < 23
+
+def sleep_until_next_window() -> None:
+    """Sleep until 05:00 Moldova time (next day if after 23:00)."""
+    now = datetime.utcnow() + timedelta(hours=MOLDOVA_OFFSET)
+    target = now.replace(hour=5, minute=0, second=0, microsecond=0)
+    if now.hour >= 23:
+        target += timedelta(days=1)
+    elif now.hour < 5:
+        pass
+    else:
+        target += timedelta(days=1)
+    sleep_seconds = (target - now).total_seconds()
+    logging.info(f"Outside running hours. Sleeping until {target.strftime('%Y-%m-%d %H:%M')} Moldova time.")
+    time.sleep(sleep_seconds)
 
 if __name__ == "__main__":
     check_env()
-
-    run_start = time.time()
     cycle_num = 0
 
     while True:
-        elapsed = time.time() - run_start
-        if elapsed >= TOTAL_RUNTIME_SECONDS:
-            logging.info("Timpul limită atins (5h). Închidere.")
-            break
+        while not is_running_time():
+            sleep_until_next_window()
 
-        cycle_num  += 1
+        cycle_num += 1
         cycle_start = time.time()
         run_cycle(cycle_num)
 
-        remaining = TOTAL_RUNTIME_SECONDS - (time.time() - run_start)
-        if remaining <= 0:
-            break
+        elapsed = time.time() - cycle_start
+        sleep_time = max(0, CYCLE_INTERVAL_SECONDS - elapsed)
 
-        cycle_duration = time.time() - cycle_start
-        sleep_time = max(0, min(CYCLE_INTERVAL_SECONDS - cycle_duration, remaining))
+        now_check = datetime.utcnow() + timedelta(hours=MOLDOVA_OFFSET)
+        next_run_time = now_check + timedelta(seconds=sleep_time)
+        if next_run_time.hour >= 23 or (next_run_time.hour == 23 and next_run_time.minute > 0):
+            # Instead of sleeping, jump to next day's 05:00
+            logging.info("Next cycle would be after 23:00. Stopping until tomorrow.")
+            continue   # go back to outer while, which will sleep until 5am
 
         chisinau_now = datetime.utcnow() + timedelta(hours=MOLDOVA_OFFSET)
-        logging.info(
-            f"Ora Chișinău: {chisinau_now.strftime('%H:%M')}. "
-            f"Următorul scan în {sleep_time / 60:.1f} min."
-        )
+        logging.info(f"Ora Chișinău: {chisinau_now.strftime('%H:%M')}. Următorul scan în {sleep_time / 60:.1f} min.")
         time.sleep(sleep_time)
