@@ -43,6 +43,9 @@ POLITICAL_KEYWORDS = [
 
 BLACKLIST = ["horoscop", "vremea", "sport", "fotbal", "rețetă", "showbiz", "loto"]
 
+# Broad pass-through terms so sources like Newsmaker aren't over-filtered
+BROAD_KEYWORDS = ["moldova", "chișinău", "chisinau", "republic", "moldov"]
+
 SOURCES = {
     "TV8 Moldova":    "https://tv8.md/feed",
     "Ziarul de Gardă":"https://www.zdg.md/feed",
@@ -145,7 +148,7 @@ def is_worth_ai_check(title: str) -> bool:
     t = title.lower()
     if any(w in t for w in BLACKLIST):
         return False
-    return any(w in t for w in POLITICAL_KEYWORDS)
+    return any(w in t for w in POLITICAL_KEYWORDS) or any(w in t for w in BROAD_KEYWORDS)
 
 
 # ---------------------------------------------------------------------------
@@ -256,26 +259,19 @@ def ask_ai_batch(candidates: List[Dict]) -> List[Optional[Dict]]:
 # ---------------------------------------------------------------------------
 
 def post_to_telegram(source: str, summary: str, n_type: str, link: str) -> None:
-    badges = {
-        "politics": "🏛️ POLITIC",
-        "economy":  "🏦 ECONOMIE",
-        "conflict": "🛡️ SECURITATE",
-        "breaking": "⚠️ BREAKING",
+    type_emoji = {
+        "politics": "🏛",
+        "economy":  "💰",
+        "conflict": "🛡",
+        "breaking": "⚡",
     }
-    badge = badges.get(n_type, "📰 ȘTIRI")
-    
-    # Optional small caps for source
-    def small_caps(txt: str) -> str:
-        mapping = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ")
-        return txt.upper().translate(mapping)
-    
-    source_fancy = small_caps(source)
-    
+    emoji = type_emoji.get(n_type, "📰")
+
     message = (
-        f"🌟 <b>Republica News</b>\n"
-        f"✦ {badge}  ✦ {source_fancy}\n\n"
-        f"   <i>„{summary}”</i>\n\n"
-        f"   🔗 <a href='{link}'>⟳ Citește articolul</a>"
+        f"<b>Republica News</b>\n"
+        f"<b>{source}</b>\n\n"
+        f"{emoji} {summary}\n\n"
+        f"🔗 <a href='{link}'>Citește articolul</a>"
     )
     # send with parse_mode="HTML"
     
